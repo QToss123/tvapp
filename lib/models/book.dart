@@ -1,0 +1,15 @@
+class Book {
+  final String title;
+  final String author;
+  final int progress; // 0..100
+  final String? thumbnail; // Image URL or asset path
+  final String? contentUrl; // URL to load book content in webview
+
+  const Book({
+    required this.title,
+    required this.author,
+    required this.progress,
+    this.thumbnail,
+    this.contentUrl,
+  });
+}

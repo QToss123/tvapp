@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Interactive Player</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/components.css">
+
+    <!-- PDF.js UMD -->
+    <script src="js/libs/pdf.min.js"></script>
+    <script>
+        if (window.pdfjsLib) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'js/libs/pdf.worker.min.js';
+        }
+    </script>
+    <link rel="stylesheet" href="css/custom-theme.css">
+</head>
+
+<body>
+    <div id="app">
+        <!-- Navigation Sidebar -->
+        <div id="nav-sidebar" class="sidebar-hidden">
+            <div class="sidebar-header">
+                <h3>Navigation</h3>
+                <button id="btn-close-sidebar">&times;</button>
+            </div>
+            <div class="sidebar-content">
+                <!-- TOC Section -->
+                <div class="sidebar-section">
+                    <div class="section-header" data-target="toc-list">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
+                                viewBox="0 0 24 24" style="color:#9ca3af;">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7" />
+                            </svg>
+                            <span>Table of Contents</span>
+                        </div>
+                        <span class="chevron"></span>
+                    </div>
+                    <ul id="toc-list" class="section-list"></ul>
+                </div>
+
+                <!-- Animations Section -->
+                <div class="sidebar-section">
+                    <div class="section-header" data-target="anim-list">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
+                                viewBox="0 0 24 24" style="color:#9ca3af;">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <span>Animations</span>
+                        </div>
+                        <span class="chevron"></span>
+                    </div>
+                    <ul id="anim-list" class="section-list"></ul>
+                </div>
+
+                <!-- Interactivities Section -->
+                <div class="sidebar-section">
+                    <div class="section-header" data-target="interact-list">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
+                                viewBox="0 0 24 24" style="color:#9ca3af;">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+                            </svg>
+                            <span>Interactivities</span>
+                        </div>
+                        <span class="chevron"></span>
+                    </div>
+                    <ul id="interact-list" class="section-list"></ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div id="loading-overlay"
+            style="position: fixed; inset: 0; background: #111827; display: flex; align-items: center; justify-content: center; color: white; z-index: 300;">
+            <div class="loader-content">
+                <!-- Logo superimposed -->
+                <div class="loader-logo-container">
+                    <img id="loader-project-logo" class="loader-logo" style="display:none;" alt="Logo">
+                </div>
+
+                <!-- Flipping Book -->
+                <div class="book-animation">
+                    <div class="inner">
+                        <div class="base"></div>
+                        <div class="page"></div>
+                        <div class="page"></div>
+                        <div class="page"></div>
+                    </div>
+                </div>
+
+                <div class="loader-text">Loading Book...</div>
+            </div>
+        </div>
+
+        <!-- HEADER BAR -->
+        <header class="header-bar">
+            <!-- Left: Logo/Title -->
+            <!-- Left: Logo -->
+            <div class="header-left">
+                <img id="project-logo" class="hidden" style="height: 32px; width:auto; object-fit:contain;" alt="Logo">
+            </div>
+
+            <!-- Center: Title -->
+            <div class="header-center">
+                <span id="book-title" style="font-weight:bold; font-size:1.1rem;"></span>
+            </div>
+
+            <!-- Right: Tools & Notes -->
+            <div class="header-right">
+                <!-- Bookmark -->
+                <button class="header-btn" id="btn-bookmark" title="Bookmark Page">
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M17 3H7c-1.1 0-1.99.9-1.99 2L5 21l7-3 7 3V5c0-1.1-.9-2-2-2z" />
+                    </svg>
+                </button>
+
+                <!-- Highlighter -->
+                <div style="position:relative; display:flex; align-items:center;">
+                    <button class="header-btn" id="btn-highlighter" title="Highlighter">
+                        <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="none" opacity="0" />
+                        </svg>
+                    </button>
+                    <div id="highlighter-colors" class="hidden"
+                        style="position:absolute; top:110%; left:50%; transform:translateX(-50%); background:white; padding:8px; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.2); display:flex; align-items:center; gap:8px; z-index:400;">
+                        <div class="color-swatch active" data-color="#FFFF00"
+                            style="width:24px; height:24px; border-radius:50%; background:#FFFF00; cursor:pointer; border:2px solid #e5e7eb;"
+                            title="Yellow">
+                        </div>
+                        <div class="color-swatch" data-color="#00FF00"
+                            style="width:24px; height:24px; border-radius:50%; background:#00FF00; cursor:pointer; border:2px solid #e5e7eb;"
+                            title="Green">
+                        </div>
+                        <div class="color-swatch" data-color="#00FFFF"
+                            style="width:24px; height:24px; border-radius:50%; background:#00FFFF; cursor:pointer; border:2px solid #e5e7eb;"
+                            title="Blue">
+                        </div>
+                        <div class="color-swatch" data-color="#FF00FF"
+                            style="width:24px; height:24px; border-radius:50%; background:#FF00FF; cursor:pointer; border:2px solid #e5e7eb;"
+                            title="Pink">
+                        </div>
+                        <div style="width:1px; height:20px; background:#e5e7eb; margin:0 4px;"></div>
+                        <button id="btn-highlight-undo"
+                            style="border:none; background:transparent; cursor:pointer; color:#6b7280; padding:2px;"
+                            title="Undo Last">
+                            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+                                viewBox="0 0 24 24">
+                                <path d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" stroke-linecap="round"
+                                    stroke-linejoin="round" />
+                            </svg>
+                        </button>
+                        <button id="btn-highlight-clear"
+                            style="border:none; background:transparent; cursor:pointer; color:#ef4444; padding:2px;"
+                            title="Clear All">
+                            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+                                viewBox="0 0 24 24">
+                                <path
+                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                    stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Timer Toggle -->
+                <button class="header-btn" id="btn-timer-toggle" title="Toggle Timer">
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                        <path
+                            d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.962 8.962 0 0 0 12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9a8.994 8.994 0 0 0 9-9c0-1.13-.23-2.19-.61-3.19zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z" />
+                    </svg>
+                </button>
+
+                <!-- Notes -->
+                <!-- Notes (New Icon) -->
+                <button class="header-btn" id="btn-notes" title="Notes">
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                        <path
+                            d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Timer Widget -->
+        <div id="timer-widget" class="hidden">
+            <span id="timer-display">00:00</span>
+            <button id="timer-btn">Start</button>
+            <button id="timer-reset-btn"
+                style="background:#6b7280; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer;"
+                title="Reset">â»</button>
+        </div>
+
+        <!-- THUMBNAILS STRIP -->
+        <div id="thumbnails-overlay" class="thumbnails-overlay">
+            <!-- Items injected via JS -->
+        </div>
+
+        <!-- READER VIEW -->
+        <div id="reader-view" class="view-mode-single">
+            <div id="reader-content">
+                <!-- Pages injected here -->
+            </div>
+
+            <!-- Audio Element -->
+            <audio id="page-flip-audio" src="audio/pageflip.mp3" preload="auto"></audio>
+        </div>
+
+        <!-- FOOTER CONTROLS -->
+        <div class="controls-bar">
+            <div class="footer-inner">
+                <!-- Home / Navigation -->
+                <button class="btn-control" id="btn-home" title="Home / Navigation">
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
+                    </svg>
+                </button>
+
+                <!-- Thumbnails -->
+                <button class="btn-control" id="btn-thumbs" title="Thumbnails">
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                        <path
+                            d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z" />
+                    </svg>
+                </button>
+
+                <!-- Page Controls -->
+                <div class="footer-page-control" style="display:flex; align-items:center; gap:8px; margin-right:10px;">
+                    <span style="font-size:0.8rem; color:#cbd5e1;">Page</span>
+                    <input type="number" id="page-jump-input" class="page-input" min="1" value="1"
+                        style="width:50px; background:#374151; border:1px solid #4b5563; color:white; border-radius:4px; padding:2px 4px;">
+                    <span id="page-total-disp" style="font-size:0.8rem; color:#cbd5e1;">/ 10</span>
+                </div>
+
+                <!-- Zoom Out -->
+                <button class="btn-control" id="btn-zoom-out" title="Zoom Out">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M20 12H4" stroke-linecap="round" />
+                    </svg>
+                </button>
+
+                <!-- Zoom In -->
+                <button class="btn-control" id="btn-zoom-in" title="Zoom In">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M12 4v16m8-8H4" stroke-linecap="round" />
+                    </svg>
+                </button>
+
+                <!-- Single View -->
+                <button class="btn-control active" id="btn-single" title="Single Page View">
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                        <path
+                            d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
+                    </svg>
+                </button>
+
+                <!-- Two Page View -->
+                <button class="btn-control" id="btn-double" title="Two Page View">
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                        <path
+                            d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z" />
+                    </svg>
+                </button>
+
+                <!-- Fullscreen -->
+                <button class="btn-control" id="btn-fullscreen" title="Fullscreen">
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+                    </svg>
+                </button>
+
+                <!-- Prev/Next -->
+                <button class="btn-control" id="btn-prev" title="Previous Page">
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+                    </svg>
+                </button>
+                <button class="btn-control" id="btn-next" title="Next Page">
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Modal Container -->
+        <div id="modal-overlay" class="hidden">
+            <div id="modal-content">
+                <button id="modal-close">&times;</button>
+                <div id="modal-body">
+                    <!-- Dynamic Content -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Interaction Elements -->
+    <div id="hotspot-layer"></div>
+
+    <!-- Data & Scripts -->
+    <script src="data/book_data.js"></script>
+    <script src="js/main.js"></script>
+    
+    <script src="js/interactions.js"></script>
+</body>
+
+</html>

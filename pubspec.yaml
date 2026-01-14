@@ -1,0 +1,42 @@
+name: tv_app_books
+description: "Bookshelf App (Android + Windows + Linux)"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  shared_preferences: ^2.2.3
+  webview_flutter: ^4.4.2
+  path_provider: ^2.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/books/
+    - assets/books/book1/
+    - assets/books/book1/index.html
+    - assets/books/book1/css/
+    - assets/books/book1/js/
+    - assets/books/book1/js/libs/
+    - assets/books/book1/audio/
+    - assets/books/book1/data/
+    - assets/books/book1/assets/
+    - assets/books/book2/
+    - assets/books/book2/index.html
+    - assets/books/book2/css/
+    - assets/books/book2/js/
+    - assets/books/book2/js/libs/
+    - assets/books/book2/audio/
+    - assets/books/book2/data/
+    - assets/books/book2/assets/
