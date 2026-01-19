@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:file_picker/file_picker.dart';
+import '../routes.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -10,15 +12,17 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   static const _kLicenseNumber = 'licenseNumber';
+  static const _kLicenseActivated = 'licenseActivated';
+  static const _kLicenseExpiryDate = 'licenseExpiryDate';
   static const _kSyncType = 'syncType';
   static const _kStorageLocation = 'storageLocation';
 
   final TextEditingController _licenseController = TextEditingController();
+  bool _isLicenseActivated = false;
   String _syncType = 'online';
-  String _storageLocation = 'internal';
+  String _storageLocation = 'Not selected';
 
   final List<String> _syncTypes = ['online', 'from external'];
-  final List<String> _storageLocations = ['internal', 'external', 'cloud'];
 
   @override
   void initState() {
@@ -36,14 +40,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _licenseController.text = prefs.getString(_kLicenseNumber) ?? '';
+      _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
-      _storageLocation = prefs.getString(_kStorageLocation) ?? 'internal';
+      _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';
     });
+  }
+
+  Future<void> _activateLicense() async {
+    final licenseNumber = _licenseController.text.trim();
+    
+    if (licenseNumber.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a license number'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    
+    if (licenseNumber.length > 16) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('License number must be 16 characters or less'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    
+    // Auto-set expiry date to 1 year from now
+    final expiryDate = DateTime.now().add(const Duration(days: 365));
+    final expiryDateStr = '${expiryDate.year}-${expiryDate.month.toString().padLeft(2, '0')}-${expiryDate.day.toString().padLeft(2, '0')}';
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kLicenseNumber, licenseNumber);
+    await prefs.setString(_kLicenseExpiryDate, expiryDateStr);
+    await prefs.setBool(_kLicenseActivated, true);
+    
+    setState(() {
+      _isLicenseActivated = true;
+    });
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('License activated successfully'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.green,
+        ),
+      );
+      
+      // Navigate back to home screen after activation
+      // Pass true to indicate license was activated
+      // Home screen will automatically refresh and show books
+      Navigator.pop(context, true);
+    }
   }
 
   Future<void> _saveAll() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kLicenseNumber, _licenseController.text);
     await prefs.setString(_kSyncType, _syncType);
     await prefs.setString(_kStorageLocation, _storageLocation);
     
@@ -54,19 +110,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
           duration: Duration(seconds: 2),
         ),
       );
+      
+      // Navigate back to home screen after saving
+      // Pass true to indicate settings were saved
+      Navigator.pop(context, true);
     }
   }
 
   Future<void> _reset() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kLicenseNumber);
+    await prefs.remove(_kLicenseActivated);
+    await prefs.remove(_kLicenseExpiryDate);
     await prefs.remove(_kSyncType);
     await prefs.remove(_kStorageLocation);
     
     setState(() {
       _licenseController.text = '';
+      _isLicenseActivated = false;
       _syncType = 'online';
-      _storageLocation = 'internal';
+      _storageLocation = 'Not selected';
     });
     
     if (mounted) {
@@ -77,6 +140,100 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
     }
+  }
+
+  Future<void> _pickStorageLocation() async {
+    try {
+      // For Android TV, file_picker might not work well
+      // Try directory picker first
+      String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Select folder to store books',
+      );
+
+      if (selectedDirectory != null && selectedDirectory.isNotEmpty) {
+        setState(() {
+          _storageLocation = selectedDirectory;
+        });
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Storage location selected: ${selectedDirectory.split('/').last}'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        // If file picker doesn't work, show manual input dialog for TV
+        _showManualPathInput();
+      }
+    } catch (e) {
+      debugPrint('File picker error: $e');
+      // On Android TV, file picker might not be available
+      // Show manual path input as fallback
+      if (mounted) {
+        _showManualPathInput();
+      }
+    }
+  }
+
+  void _showManualPathInput() {
+    final TextEditingController pathController = TextEditingController(
+      text: _storageLocation != 'Not selected' ? _storageLocation : '',
+    );
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Enter Storage Path'),
+        content: TextField(
+          controller: pathController,
+          decoration: const InputDecoration(
+            labelText: 'Folder Path',
+            hintText: '/storage/XXXX-XXXX/books',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final path = pathController.text.trim();
+              if (path.isNotEmpty) {
+                setState(() {
+                  _storageLocation = path;
+                });
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Storage location updated'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<String> _getExpiryDate() async {
+    final prefs = await SharedPreferences.getInstance();
+    final expiryDateStr = prefs.getString(_kLicenseExpiryDate) ?? '';
+    if (expiryDateStr.isNotEmpty) {
+      try {
+        final expiryDate = DateTime.parse(expiryDateStr);
+        return '${expiryDate.year}-${expiryDate.month.toString().padLeft(2, '0')}-${expiryDate.day.toString().padLeft(2, '0')}';
+      } catch (e) {
+        return 'Invalid date';
+      }
+    }
+    return 'Not set';
   }
 
   @override
@@ -101,15 +258,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: _licenseController,
-                    decoration: const InputDecoration(
-                      labelText: 'License Number',
-                      hintText: 'Enter your license number',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.vpn_key),
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _licenseController,
+                          enabled: !_isLicenseActivated,
+                          maxLength: 16,
+                          decoration: InputDecoration(
+                            labelText: 'License Number',
+                            hintText: 'Enter your license number (max 16 chars)',
+                            border: const OutlineInputBorder(),
+                            prefixIcon: const Icon(Icons.vpn_key),
+                            suffixIcon: _isLicenseActivated
+                                ? const Icon(
+                                    Icons.check_circle,
+                                    color: Colors.green,
+                                  )
+                                : null,
+                            counterText: '',
+                          ),
+                        ),
+                      ),
+                      if (!_isLicenseActivated) ...[
+                        const SizedBox(width: 12),
+                        ElevatedButton.icon(
+                          onPressed: _activateLicense,
+                          icon: const Icon(Icons.verified),
+                          label: const Text('Activate'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 16,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
+                  if (_isLicenseActivated) ...[
+                    const SizedBox(height: 16),
+                    FutureBuilder<String>(
+                      future: _getExpiryDate(),
+                      builder: (context, snapshot) {
+                        if (snapshot.hasData) {
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.calendar_today, size: 20, color: Colors.grey),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Expiry Date: ${snapshot.data}',
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -171,24 +386,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: _storageLocation,
-                    decoration: const InputDecoration(
-                      labelText: 'Where to store books',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.folder),
+                  OutlinedButton.icon(
+                    onPressed: _pickStorageLocation,
+                    icon: const Icon(Icons.folder_open),
+                    label: const Text('Select Folder'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 16,
+                      ),
+                      minimumSize: const Size(double.infinity, 50),
                     ),
-                    items: _storageLocations.map((String location) {
-                      return DropdownMenuItem<String>(
-                        value: location,
-                        child: Text(location),
-                      );
-                    }).toList(),
-                    onChanged: (String? value) {
-                      if (value != null) {
-                        setState(() => _storageLocation = value);
-                      }
-                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.folder, size: 20, color: Colors.grey),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _storageLocation,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: _storageLocation == 'Not selected'
+                                  ? Colors.grey.shade600
+                                  : Colors.black87,
+                              fontStyle: _storageLocation == 'Not selected'
+                                  ? FontStyle.italic
+                                  : FontStyle.normal,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
