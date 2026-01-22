@@ -7,7 +7,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Bookshelf',
+      title: 'Burlington',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

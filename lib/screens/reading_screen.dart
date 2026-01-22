@@ -1,7 +1,18 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 import '../models/book.dart';
+import '../utils/zip_handler.dart';
+
+/// Intent for TV remote key directions
+class DirectionIntent extends Intent {
+  final String dir;
+  const DirectionIntent(this.dir);
+}
 
 class ReadingScreen extends StatefulWidget {
   final Book book;
@@ -19,12 +30,170 @@ class _ReadingScreenState extends State<ReadingScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
   String? _error;
+  HttpServer? _localServer; // Local HTTP server for serving book files
+  int _serverPort = 8080; // Port for local server
+  final FocusNode _webViewFocusNode = FocusNode(); // Focus node for WebView (TV navigation)
 
   @override
   void initState() {
     super.initState();
     _initializeWebView();
+    // Request focus after first frame (for TV navigation)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _webViewFocusNode.requestFocus();
+        debugPrint('🎮 [READING] WebView focus requested on init');
+      }
+    });
   }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Request focus when screen becomes visible (for TV navigation)
+    if (!_isLoading && _error == null) {
+      _requestWebViewFocus();
+    }
+  }
+
+  @override
+  void dispose() {
+    // Stop local HTTP server
+    _stopLocalServer();
+    // Dispose focus node
+    _webViewFocusNode.dispose();
+    super.dispose();
+  }
+
+  /// Requests focus on the WebView for TV remote navigation
+  void _requestWebViewFocus() {
+    // Request focus after a short delay to ensure WebView is ready
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted && _webViewFocusNode.canRequestFocus) {
+        _webViewFocusNode.requestFocus();
+        debugPrint('🎮 [READING] WebView focus requested for TV remote navigation');
+      }
+    });
+  }
+
+  /// Sends TV remote key events to the WebView via JavaScript
+  /// This intercepts Flutter key events and forwards them to the HTML page
+  Future<void> _sendKeyToWeb(String direction) async {
+    try {
+      // Map direction to keyCode
+      final keyCodeMap = {
+        'up': 38,
+        'down': 40,
+        'left': 37,
+        'right': 39,
+        'enter': 13,
+      };
+      
+      final keyCode = keyCodeMap[direction] ?? 0;
+      if (keyCode == 0) {
+        debugPrint('⚠️ [READING] Unknown direction: $direction');
+        return;
+      }
+      
+      debugPrint('🎮 [READING] Sending key to WebView: $direction (keyCode: $keyCode)');
+      
+      // Inject JavaScript to simulate keyboard event in the HTML page
+      final jsCode = '''
+        (function() {
+          const keyCode = $keyCode;
+          // Create and dispatch keyboard event
+          const ev = new KeyboardEvent('keydown', {
+            keyCode: keyCode,
+            which: keyCode,
+            bubbles: true,
+            cancelable: true
+          });
+          
+          // Dispatch to both document and window
+          document.dispatchEvent(ev);
+          window.dispatchEvent(ev);
+          
+          // Also try to trigger on focused element
+          const focused = document.activeElement;
+          if (focused) {
+            focused.dispatchEvent(ev);
+          }
+          
+          // For Enter key, also trigger click on focused element
+          if (keyCode === 13) {
+            if (focused && (focused.tagName === 'A' || focused.tagName === 'BUTTON' || focused.onclick)) {
+              focused.click();
+            }
+          }
+        })();
+      ''';
+      
+      await _controller.runJavaScript(jsCode);
+    } catch (e) {
+      debugPrint('❌ [READING] Error sending key to WebView: $e');
+    }
+  }
+
+  /// Injects JavaScript to enable keyboard/D-pad navigation in the HTML content
+  Future<void> _enableKeyboardNavigation() async {
+    try {
+      // Inject JavaScript to make the page focusable and enable keyboard navigation
+      const jsCode = '''
+        (function() {
+          // Make body focusable
+          if (document.body) {
+            document.body.setAttribute('tabindex', '0');
+            if (!document.activeElement || document.activeElement === document.body) {
+              document.body.focus();
+            }
+          }
+          
+          // Enable keyboard navigation for all interactive elements
+          const interactiveElements = document.querySelectorAll('a, button, input, select, textarea, [tabindex], [onclick]');
+          interactiveElements.forEach(function(el) {
+            if (!el.hasAttribute('tabindex')) {
+              el.setAttribute('tabindex', '0');
+            }
+          });
+          
+          // Handle keyboard events
+          document.addEventListener('keydown', function(e) {
+            // Handle Enter key (D-pad center button)
+            if (e.key === 'Enter' || e.keyCode === 13) {
+              const focused = document.activeElement;
+              if (focused && (focused.tagName === 'A' || focused.tagName === 'BUTTON' || focused.onclick)) {
+                focused.click();
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }
+          });
+          
+          console.log('Keyboard navigation enabled for TV remote');
+        })();
+      ''';
+      
+      await _controller.runJavaScript(jsCode);
+      debugPrint('✅ [READING] Keyboard navigation enabled in HTML');
+    } catch (e) {
+      debugPrint('⚠️ [READING] Error enabling keyboard navigation: $e');
+    }
+  }
+
+  /// Stops the local HTTP server
+  Future<void> _stopLocalServer() async {
+    if (_localServer != null) {
+      try {
+        debugPrint('🛑 [READING] Stopping local HTTP server on port $_serverPort...');
+        await _localServer!.close(force: true);
+        _localServer = null;
+        debugPrint('✅ [READING] Local HTTP server stopped');
+      } catch (e) {
+        debugPrint('⚠️ [READING] Error stopping local server: $e');
+      }
+    }
+  }
+
 
   void _initializeWebView() {
     _controller = WebViewController()
@@ -49,6 +218,10 @@ class _ReadingScreenState extends State<ReadingScreen> {
             setState(() {
               _isLoading = false;
             });
+            // Request focus on WebView after page loads (for TV remote navigation)
+            _requestWebViewFocus();
+            // Inject JavaScript to enable keyboard/D-pad navigation in HTML
+            _enableKeyboardNavigation();
           },
           onWebResourceError: (WebResourceError error) {
             // Only show error for main page load, ignore resource errors (they're logged but not critical)
@@ -105,11 +278,16 @@ class _ReadingScreenState extends State<ReadingScreen> {
   /// Normalizes the content URL to handle book folders.
   /// If the URL points to a folder (ends with / or no file extension),
   /// it automatically appends 'index.html'
+  /// Note: ZIP files are handled separately and don't need normalization here
   String _normalizeContentUrl(String url) {
     // If it's a network URL or file:// URL, don't modify
     if (url.startsWith('http://') || 
         url.startsWith('https://') || 
         url.startsWith('file://')) {
+      // For ZIP files, return as is (will be handled in _loadFile)
+      if (url.toLowerCase().endsWith('.zip')) {
+        return url;
+      }
       // For network/file URLs, if it ends with /, append index.html
       if (url.endsWith('/')) {
         return url + 'index.html';
@@ -123,7 +301,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
     
     // Check if it already has a file extension
     if (normalized.contains('.')) {
-      // Has extension, use as is
+      // Has extension, use as is (could be .html, .zip, etc.)
       return normalized;
     }
     
@@ -205,65 +383,86 @@ class _ReadingScreenState extends State<ReadingScreen> {
   }
 
   /// Loads a file from external storage (USB drive, SD card, etc.)
-  /// Handles file:// URLs and ensures CSS/JS resources load correctly
+  /// Copies the book folder to internal storage first, then loads from there
+  /// This bypasses Android 10+ file:// access restrictions
+  /// Cleans up the copied folder when done
   Future<void> _loadFile(String fileUrl) async {
     try {
-      debugPrint('Loading file from external storage: $fileUrl');
+      debugPrint('📂 [READING] Loading file from external storage: $fileUrl');
       
       // Parse the file:// URL
       final uri = Uri.parse(fileUrl);
-      final filePath = uri.path;
-      final file = File(filePath);
+      var filePath = uri.path;
+      var file = File(filePath);
       
       // Check if file exists
       if (!await file.exists()) {
         throw Exception('File not found: $filePath');
       }
       
-      debugPrint('File exists, reading content from: $filePath');
+      // Check if file is a ZIP and extract it if necessary
+      debugPrint('📦 [READING] Checking if file is a ZIP: $filePath');
+      final processed = await ZipHandler.processBookFile(filePath);
+      filePath = processed.path;
       
-      // Read HTML content
-      final String htmlContent = await file.readAsString();
-      debugPrint('Successfully read HTML content (${htmlContent.length} chars)');
-      
-      // Extract directory path for base URL
-      final fileDir = file.parent.path;
-      // Ensure path ends with slash for proper base URL
-      final basePath = fileDir.endsWith('/') ? fileDir : '$fileDir/';
-      
-      debugPrint('Base path: $basePath');
-      
-      // Inject base tag into HTML to ensure relative resources load correctly
-      String modifiedHtml = htmlContent;
-      if (!modifiedHtml.contains('<base')) {
-        final headIndex = modifiedHtml.indexOf('<head>');
-        if (headIndex != -1) {
-          final insertIndex = headIndex + 6; // After '<head>'
-          // Use file:// protocol for the base href
-          final baseHref = 'file://$basePath';
-          modifiedHtml = modifiedHtml.substring(0, insertIndex) +
-              '\n    <base href="$baseHref">' +
-              modifiedHtml.substring(insertIndex);
-          debugPrint('Injected base tag with href: $baseHref');
-        }
+      if (processed.wasExtracted) {
+        debugPrint('📦 [READING] ZIP file was extracted to: $filePath');
       }
       
-      // Load HTML with base URL pointing to the file's directory
-      // This ensures CSS, JS, and other relative resources load correctly
-      final baseUrl = 'file://$basePath';
-      debugPrint('Loading with base URL: $baseUrl');
+      // Determine the book directory
+      Directory bookDirectory;
+      String? indexHtmlPath;
       
-      await _controller.loadHtmlString(
-        modifiedHtml,
-        baseUrl: baseUrl,
-      );
+      file = File(filePath);
+      final isFile = await file.exists();
+      final dir = Directory(filePath);
+      final isDirectory = await dir.exists();
       
-      debugPrint('Successfully loaded file from external storage');
+      if (isFile) {
+        // It's a file (e.g., index.html), use its parent directory
+        bookDirectory = file.parent;
+        indexHtmlPath = filePath;
+      } else if (isDirectory) {
+        // It's a directory, look for index.html
+        debugPrint('📂 [READING] Path is a directory, searching for index.html: $filePath');
+        indexHtmlPath = await ZipHandler.findIndexHtml(filePath);
+        
+        if (indexHtmlPath == null) {
+          throw Exception('No index.html found in directory: $filePath');
+        }
+        
+        bookDirectory = Directory(filePath);
+      } else {
+        throw Exception('Path is neither a file nor a directory: $filePath');
+      }
+      
+      debugPrint('📂 [READING] Book directory: ${bookDirectory.path}');
+      debugPrint('📄 [READING] Index HTML: $indexHtmlPath');
+      
+      // Start local HTTP server to serve book files
+      debugPrint('🚀 [READING] Starting local HTTP server...');
+      await _startLocalServer(bookDirectory);
+      
+      // Calculate relative path to index.html from book directory
+      final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path);
+      // Normalize path separators for URL
+      final urlPath = relativePath.replaceAll('\\', '/');
+      
+      // Load book via localhost HTTP server
+      final bookUrl = 'http://127.0.0.1:$_serverPort/$urlPath';
+      debugPrint('🌐 [READING] Loading book via localhost: $bookUrl');
+      debugPrint('✅ [READING] All resources (CSS, JS, audio) will load via HTTP server');
+      
+      await _controller.loadRequest(Uri.parse(bookUrl));
+      
+      debugPrint('✅ [READING] Successfully loaded book via local HTTP server');
       setState(() {
         _isLoading = false;
       });
     } catch (e) {
-      debugPrint('Failed to load file: $e');
+      debugPrint('❌ [READING] Failed to load file: $e');
+      // Clean up on error
+      await _stopLocalServer();
       setState(() {
         _isLoading = false;
         _error = 'Failed to load book from external storage\n\n'
@@ -272,9 +471,128 @@ class _ReadingScreenState extends State<ReadingScreen> {
             'Make sure:\n'
             '1. The file exists at the specified path\n'
             '2. The device has read permissions\n'
-            '3. The path is correct (e.g., file:///storage/XXXX-XXXX/books/book1/index.html)';
+            '3. The path is correct (e.g., file:///storage/XXXX-XXXX/books/book1/index.html or file:///storage/XXXX-XXXX/books/book1.zip)';
       });
     }
+  }
+
+  /// Starts a local HTTP server to serve book files
+  /// This bypasses Android 10+ file:// access restrictions
+  Future<void> _startLocalServer(Directory bookDirectory) async {
+    // Stop any existing server first
+    await _stopLocalServer();
+    
+    // Try to find an available port starting from 8080
+    for (int port = 8080; port < 8090; port++) {
+      try {
+        _serverPort = port;
+        _localServer = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+        debugPrint('✅ [READING] Local HTTP server started on http://127.0.0.1:$port');
+        break;
+      } catch (e) {
+        if (port == 8089) {
+          throw Exception('Could not find available port for local server');
+        }
+        continue;
+      }
+    }
+    
+    // Handle incoming requests
+    _localServer!.listen((HttpRequest request) async {
+      try {
+        // Get the requested path
+        var requestedPath = request.uri.path;
+        // Remove leading slash
+        if (requestedPath.startsWith('/')) {
+          requestedPath = requestedPath.substring(1);
+        }
+        
+        // If root path, serve index.html
+        if (requestedPath.isEmpty || requestedPath == '/') {
+          requestedPath = 'index.html';
+        }
+        
+        // Build full file path
+        final filePath = path.join(bookDirectory.path, requestedPath);
+        final file = File(filePath);
+        
+        debugPrint('📡 [SERVER] Request: ${request.uri.path} -> $filePath');
+        
+        if (await file.exists()) {
+          // Determine content type
+          String contentType = 'application/octet-stream';
+          final ext = path.extension(filePath).toLowerCase();
+          switch (ext) {
+            case '.html':
+              contentType = 'text/html; charset=utf-8';
+              break;
+            case '.css':
+              contentType = 'text/css; charset=utf-8';
+              break;
+            case '.js':
+              contentType = 'application/javascript; charset=utf-8';
+              break;
+            case '.json':
+              contentType = 'application/json; charset=utf-8';
+              break;
+            case '.png':
+              contentType = 'image/png';
+              break;
+            case '.jpg':
+            case '.jpeg':
+              contentType = 'image/jpeg';
+              break;
+            case '.gif':
+              contentType = 'image/gif';
+              break;
+            case '.svg':
+              contentType = 'image/svg+xml';
+              break;
+            case '.mp3':
+              contentType = 'audio/mpeg';
+              break;
+            case '.mp4':
+              contentType = 'video/mp4';
+              break;
+            case '.woff':
+              contentType = 'font/woff';
+              break;
+            case '.woff2':
+              contentType = 'font/woff2';
+              break;
+            case '.ttf':
+              contentType = 'font/ttf';
+              break;
+          }
+          
+          // Read and serve file
+          final fileBytes = await file.readAsBytes();
+          request.response
+            ..headers.contentType = ContentType.parse(contentType)
+            ..headers.contentLength = fileBytes.length
+            ..add(fileBytes)
+            ..close();
+          
+          debugPrint('✅ [SERVER] Served: ${request.uri.path} (${fileBytes.length} bytes)');
+        } else {
+          // File not found
+          request.response
+            ..statusCode = HttpStatus.notFound
+            ..write('File not found: ${request.uri.path}')
+            ..close();
+          
+          debugPrint('❌ [SERVER] File not found: ${request.uri.path}');
+        }
+      } catch (e) {
+        debugPrint('❌ [SERVER] Error serving request: $e');
+        request.response
+          ..statusCode = HttpStatus.internalServerError
+          ..write('Server error: $e')
+          ..close();
+      }
+    });
+    
+    debugPrint('🌐 [READING] Server ready to serve files from: ${bookDirectory.path}');
   }
 
   String _getPlaceholderHtml() {
@@ -329,6 +647,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
             },
           ),
         ],
+        // Prevent AppBar from stealing focus on TV
+        automaticallyImplyLeading: false,
       ),
       body: Stack(
         children: [
@@ -370,7 +690,35 @@ class _ReadingScreenState extends State<ReadingScreen> {
               ),
             )
           else
-            WebViewWidget(controller: _controller),
+            // Intercept TV remote keys and forward to WebView
+            Shortcuts(
+              shortcuts: <LogicalKeySet, Intent>{
+                // D-pad navigation
+                LogicalKeySet(LogicalKeyboardKey.arrowUp): const DirectionIntent('up'),
+                LogicalKeySet(LogicalKeyboardKey.arrowDown): const DirectionIntent('down'),
+                LogicalKeySet(LogicalKeyboardKey.arrowLeft): const DirectionIntent('left'),
+                LogicalKeySet(LogicalKeyboardKey.arrowRight): const DirectionIntent('right'),
+                // Enter/Select button
+                LogicalKeySet(LogicalKeyboardKey.select): const DirectionIntent('enter'),
+                LogicalKeySet(LogicalKeyboardKey.enter): const DirectionIntent('enter'),
+              },
+              child: Actions(
+                actions: <Type, Action<Intent>>{
+                  DirectionIntent: CallbackAction<DirectionIntent>(
+                    onInvoke: (intent) {
+                      _sendKeyToWeb(intent.dir);
+                      return null;
+                    },
+                  ),
+                },
+                child: Focus(
+                  focusNode: _webViewFocusNode,
+                  autofocus: true,
+                  skipTraversal: false,
+                  child: WebViewWidget(controller: _controller),
+                ),
+              ),
+            ),
           if (_isLoading && _error == null)
             Container(
               color: Colors.white,

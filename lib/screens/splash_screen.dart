@@ -14,22 +14,39 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
+    debugPrint('');
+    debugPrint('🌅 [SPLASH] ========== SPLASH SCREEN INIT ==========');
+    debugPrint('🌅 [SPLASH] App is launching...');
+    debugPrint('🌅 [SPLASH] SplashScreen initState() called');
     _checkLicenseAndNavigate();
   }
 
   Future<void> _checkLicenseAndNavigate() async {
     // Wait for splash screen display
+    debugPrint('🌅 [SPLASH] Waiting 2 seconds before navigation...');
     await Future.delayed(const Duration(seconds: 2));
     
-    if (!mounted) return;
+    if (!mounted) {
+      debugPrint('⚠️ [SPLASH] Widget not mounted, aborting navigation');
+      return;
+    }
     
     // Check license activation and expiry
+    debugPrint('🌅 [SPLASH] Checking license validity...');
     final bool licenseValid = await _isLicenseValid();
+    debugPrint('🌅 [SPLASH] License valid: $licenseValid');
     
-    if (!mounted) return;
+    if (!mounted) {
+      debugPrint('⚠️ [SPLASH] Widget not mounted after license check, aborting');
+      return;
+    }
     
     // Navigate to home screen (it will show empty state if license not valid)
+    debugPrint('🌅 [SPLASH] Navigating to HomeScreen using pushReplacementNamed...');
+    debugPrint('🌅 [SPLASH] This will replace SplashScreen with HomeScreen');
     Navigator.pushReplacementNamed(context, AppRoutes.home);
+    debugPrint('🌅 [SPLASH] Navigation command sent - HomeScreen should initialize now');
+    debugPrint('🌅 [SPLASH] ===========================================');
   }
 
   Future<bool> _isLicenseValid() async {
@@ -75,7 +92,7 @@ class _SplashScreenState extends State<SplashScreen> {
             Icon(Icons.menu_book_rounded, size: 64),
             SizedBox(height: 12),
             Text(
-              'Bookshelf',
+              'Burlington',
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
             ),
             SizedBox(height: 6),

@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Helper class to initialize dummy/test data for the app
 class DummyData {
   // Dummy license data
-  static const String dummyLicenseNumber = 'LIQVID1234567890'; // 16 chars
+  static const String dummyLicenseNumber = 'CLA-CL21-S10-28RZBFKP0T'; // Test license
   static String get dummyExpiryDate {
     // Set expiry to 1 year from now
     final expiry = DateTime.now().add(const Duration(days: 365));

@@ -1,8 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/book.dart';
 import '../routes.dart';
 import '../widgets/book_card.dart';
+import '../services/api_service.dart';
+import '../services/database_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,10 +17,21 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _isLicenseActivated = false;
   bool _isLoading = true;
+  bool _isLoadingBooks = false;
   String? _licenseStatusMessage;
+  bool _isStorageConnected = true;
+  String? _storageLocation;
   
-  // Dummy books data - 30 books for testing
-  final List<Book> _books = const [
+  // Books loaded from API or fallback to dummy data
+  List<Book> _books = [];
+  
+  // Constructor/initialization logging
+  _HomeScreenState() {
+    debugPrint('🏗️ [HOME] HomeScreenState CONSTRUCTOR called - Widget instance created!');
+  }
+  
+  // Dummy books data - fallback for testing
+  static const List<Book> _dummyBooks = [
     Book(
       title: 'Book 1',
       author: 'Author Name',
@@ -207,21 +221,190 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    debugPrint('');
+    debugPrint('🚀 [HOME] ===========================================');
+    debugPrint('🚀 [HOME] ========== initState() CALLED ==========');
+    debugPrint('🚀 [HOME] ===========================================');
+    debugPrint('🚀 [HOME] HomeScreen widget is being initialized');
+    debugPrint('🚀 [HOME] Hash code: ${hashCode}');
+    debugPrint('🚀 [HOME] Calling _checkLicenseStatus()...');
+    debugPrint('');
     _checkLicenseStatus();
+  }
+  
+  @override
+  void dispose() {
+    debugPrint('🗑️ [HOME] dispose() called - HomeScreen widget destroyed');
+    super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_isLicenseActivated && _books.isNotEmpty) {
+      _checkStorageConnection().then((connected) {
+        if (mounted) {
+          setState(() {
+            _isStorageConnected = connected;
+          });
+          // If storage disconnected, reload status
+          if (!connected) {
+            _checkLicenseStatus();
+          }
+        }
+      });
+    }
+  }
+
+  /// Loads books from local database
+  Future<void> _loadBooks() async {
+    if (!_isLicenseActivated) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingBooks = true;
+    });
+
+    try {
+      // Verify storage is still connected before loading books
+      final storageConnected = await _checkStorageConnection();
+      if (!storageConnected) {
+        if (mounted) {
+          setState(() {
+            _isStorageConnected = false;
+            _isLoadingBooks = false;
+          });
+          // Re-check license status to show storage error
+          _checkLicenseStatus();
+        }
+        return;
+      }
+
+      // Load books from local database
+      debugPrint('🏠 [HOME] Starting to load books from database...');
+      debugPrint('🏠 [HOME] License activated: $_isLicenseActivated');
+      debugPrint('🏠 [HOME] Storage connected: $storageConnected');
+      
+      final books = await DatabaseService.getAllBooks();
+      
+      debugPrint('🏠 [HOME] Loaded ${books.length} books from database');
+      
+      if (books.isEmpty) {
+        debugPrint('⚠️ [HOME] No books returned from database!');
+        debugPrint('⚠️ [HOME] This could mean:');
+        debugPrint('   1. Database is empty');
+        debugPrint('   2. Books were not saved during sync');
+        debugPrint('   3. Database query failed');
+      } else {
+        debugPrint('✅ [HOME] Books loaded successfully:');
+        for (int i = 0; i < books.length; i++) {
+          debugPrint('   $i. "${books[i].title}" by ${books[i].author}');
+        }
+      }
+      
+      if (mounted) {
+        setState(() {
+          _books = books;
+          _isStorageConnected = true;
+          _isLoadingBooks = false;
+        });
+        debugPrint('🏠 [HOME] State updated with ${_books.length} books');
+      }
+    } catch (e, stackTrace) {
+      debugPrint('❌ [HOME] Error loading books from database: $e');
+      debugPrint('Stack trace: $stackTrace');
+      // Use empty list on error
+      if (mounted) {
+        setState(() {
+          _books = [];
+          _isLoadingBooks = false;
+        });
+      }
+    }
+  }
+
+  /// Checks if the configured storage device is connected and accessible
+  Future<bool> _checkStorageConnection() async {
+    final prefs = await SharedPreferences.getInstance();
+    final storageLocation = prefs.getString('storageLocation');
+    
+    if (storageLocation == null || 
+        storageLocation.isEmpty || 
+        storageLocation == 'Not selected') {
+      return true; // No storage configured, skip check
+    }
+    
+    _storageLocation = storageLocation;
+    
+    try {
+      final storageDir = Directory(storageLocation);
+      
+      // Check if directory exists
+      if (!await storageDir.exists()) {
+        debugPrint('Storage device not found: $storageLocation');
+        return false;
+      }
+      
+      // Try to list directory to verify accessibility
+      try {
+        await storageDir.list().first.timeout(const Duration(milliseconds: 1000));
+        debugPrint('Storage device is accessible: $storageLocation');
+        return true;
+      } catch (e) {
+        debugPrint('Cannot access storage device: $e');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('Error checking storage device: $e');
+      return false;
+    }
   }
 
   Future<void> _checkLicenseStatus() async {
+    debugPrint('🔑 [HOME] Checking license status on app start/relaunch...');
+    
     final prefs = await SharedPreferences.getInstance();
     final licenseNumber = prefs.getString('licenseNumber') ?? '';
     final isActivated = prefs.getBool('licenseActivated') ?? false;
     final expiryDateStr = prefs.getString('licenseExpiryDate') ?? '';
+    final syncCompleted = prefs.getBool('syncCompleted') ?? false;
+    
+    debugPrint('🔑 [HOME] License info:');
+    debugPrint('   - License Number: ${licenseNumber.isEmpty ? "NOT SET" : licenseNumber}');
+    debugPrint('   - Activated: $isActivated');
+    debugPrint('   - Expiry Date: ${expiryDateStr.isEmpty ? "NOT SET" : expiryDateStr}');
+    debugPrint('   - Sync Completed: $syncCompleted');
+    
+    // Check database status regardless of license
+    debugPrint('');
+    debugPrint('📊 [HOME] Checking database status...');
+    await DatabaseService.checkDatabaseStatus();
+    debugPrint('');
     
     bool isValid = false;
     String? statusMessage;
     
+    // Check storage connection if sync is completed
+    bool storageConnected = true;
+    if (syncCompleted) {
+      storageConnected = await _checkStorageConnection();
+      setState(() {
+        _isStorageConnected = storageConnected;
+      });
+      
+      if (!storageConnected) {
+        isValid = false;
+        statusMessage = 'Storage device not connected. Please connect the configured storage device to access your books.';
+      }
+    }
+    
     // Check if license is activated
     if (licenseNumber.isNotEmpty && isActivated) {
-      // Check expiry date
+      // License is activated, now check if it's valid
+      bool licenseExpired = false;
+      
+      // Check expiry date if provided
       if (expiryDateStr.isNotEmpty) {
         try {
           final expiryDate = DateTime.parse(expiryDateStr);
@@ -230,28 +413,61 @@ class _HomeScreenState extends State<HomeScreen> {
             // License has expired - deactivate it
             await prefs.setBool('licenseActivated', false);
             isValid = false;
+            licenseExpired = true;
             statusMessage = 'Your license has expired. Please renew your license.';
-          } else {
-            isValid = true;
           }
         } catch (e) {
-          // Invalid date format
-          isValid = false;
-          statusMessage = 'Invalid license expiry date. Please update in Settings.';
+          debugPrint('⚠️ [HOME] Invalid expiry date format: $expiryDateStr, error: $e');
+          // Invalid date format - but don't block access, just log warning
+          // Continue with validation
         }
       } else {
-        isValid = false;
-        statusMessage = 'License expiry date is missing. Please update in Settings.';
+        debugPrint('⚠️ [HOME] Expiry date not set, but license is activated. Allowing access.');
+        // Expiry date not set - don't block access, just allow it
+        // This can happen if activation API didn't return expiry date
+      }
+      
+      // Only check sync and storage if license is not expired
+      if (!licenseExpired) {
+        // License is valid, check if sync is completed
+        if (!syncCompleted) {
+          isValid = false;
+          statusMessage = 'License activated. Please complete configuration and sync books to continue.';
+        } else if (!storageConnected) {
+          isValid = false;
+          // Status message already set above
+        } else {
+          isValid = true;
+        }
       }
     } else {
       statusMessage = null; // Default message for no license
+      debugPrint('⚠️ [HOME] License not activated: licenseNumber="${licenseNumber.isEmpty ? "EMPTY" : licenseNumber}", isActivated=$isActivated');
     }
+    
+    debugPrint('🔑 [HOME] License check result:');
+    debugPrint('   - Is Valid: $isValid');
+    debugPrint('   - Status Message: ${statusMessage ?? "None"}');
     
     setState(() {
       _isLicenseActivated = isValid;
       _licenseStatusMessage = statusMessage;
       _isLoading = false;
     });
+
+    // Load books from database if license is activated AND sync is completed
+    if (isValid && syncCompleted) {
+      debugPrint('✅ [HOME] License valid and sync completed, loading books...');
+      _loadBooks();
+    } else {
+      debugPrint('⚠️ [HOME] Cannot load books - License valid: $isValid, Sync completed: $syncCompleted');
+      // Clear books if license is not valid or sync not completed
+      setState(() {
+        _books = [];
+      });
+    }
+    
+    debugPrint('🚀 [HOME] ========== INIT COMPLETE ==========');
   }
 
   @override
@@ -262,8 +478,13 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // Show empty state if license is not activated
+    // Show empty state if license is not activated or storage not connected
     if (!_isLicenseActivated) {
+      // Check if it's a storage connection issue
+      final isStorageIssue = !_isStorageConnected && 
+                            _licenseStatusMessage != null && 
+                            _licenseStatusMessage!.contains('Storage device');
+      
       return Scaffold(
         appBar: AppBar(
           title: const Text('Bookshelf'),
@@ -273,7 +494,7 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: const Icon(Icons.settings),
               onPressed: () async {
                 final result = await Navigator.pushNamed(context, AppRoutes.settings);
-                // Reload license status when returning from settings
+                // Reload license status and books when returning from settings
                 if (result == true || mounted) {
                   _checkLicenseStatus();
                 }
@@ -288,7 +509,9 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  Icons.lock_outline,
+                  !_isStorageConnected && _licenseStatusMessage?.contains('Storage device') == true
+                      ? Icons.usb_off
+                      : Icons.lock_outline,
                   size: 80,
                   color: Colors.grey.shade400,
                 ),
@@ -302,34 +525,82 @@ class _HomeScreenState extends State<HomeScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
-                Text(
-                  _licenseStatusMessage != null
-                      ? 'Go to Settings to update your license'
-                      : 'Go to Settings to enter and activate your license number',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey.shade600,
+                if (!_isStorageConnected && _licenseStatusMessage?.contains('Storage device') == true) ...[
+                  Text(
+                    'Configured storage location: ${_storageLocation ?? "Not available"}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey.shade600,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 32),
-                ElevatedButton.icon(
-                  onPressed: () async {
-                    final result = await Navigator.pushNamed(context, AppRoutes.settings);
-                    // Reload license status when returning from settings
-                    if (result == true || mounted) {
-                      _checkLicenseStatus();
-                    }
-                  },
-                  icon: const Icon(Icons.settings),
-                  label: const Text('Go to Settings'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 16,
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          // Retry checking storage connection
+                          await _checkLicenseStatus();
+                        },
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 16,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final result = await Navigator.pushNamed(context, AppRoutes.settings);
+                          if (result == true || mounted) {
+                            _checkLicenseStatus();
+                          }
+                        },
+                        icon: const Icon(Icons.settings),
+                        label: const Text('Settings'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 16,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  Text(
+                    _licenseStatusMessage != null
+                        ? 'Go to Settings to update your license'
+                        : 'Go to Settings to enter and activate your license number',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey.shade600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 32),
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      final result = await Navigator.pushNamed(context, AppRoutes.settings);
+                      // Reload license status when returning from settings
+                      if (result == true || mounted) {
+                        _checkLicenseStatus();
+                      }
+                    },
+                    icon: const Icon(Icons.settings),
+                    label: const Text('Go to Settings'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 16,
+                      ),
                     ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
@@ -353,9 +624,12 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.settings),
             onPressed: () async {
               final result = await Navigator.pushNamed(context, AppRoutes.settings);
-              // Reload license status when returning from settings
-              if (result == true || mounted) {
-                _checkLicenseStatus();
+              // Reload license status and books when returning from settings
+              if (mounted) {
+                await _checkLicenseStatus();
+                if (_isLicenseActivated) {
+                  await _loadBooks();
+                }
               }
             },
           ),
@@ -371,13 +645,35 @@ class _HomeScreenState extends State<HomeScreen> {
                 hintText: 'Search books or authors...',
                 border: OutlineInputBorder(),
               ),
-              onChanged: (v) => setState(() => _query = v),
+              onChanged: (v) async {
+                setState(() => _query = v);
+                if (v.isNotEmpty) {
+                  // Search in database
+                  debugPrint('🔍 [HOME] Searching for: "$v"');
+                  try {
+                    final filtered = await DatabaseService.searchBooks(v);
+                    debugPrint('🔍 [HOME] Search returned ${filtered.length} results');
+                    setState(() {
+                      _books = filtered;
+                    });
+                  } catch (e) {
+                    debugPrint('❌ [HOME] Search error: $e');
+                    // Keep current books on error
+                  }
+                } else {
+                  // Reload all books
+                  debugPrint('🔍 [HOME] Search cleared, reloading all books');
+                  _loadBooks();
+                }
+              },
             ),
             const SizedBox(height: 16),
             Expanded(
-              child: filtered.isEmpty
-                  ? const Center(child: Text('No books found.'))
-                  : GridView.builder(
+              child: _isLoadingBooks
+                  ? const Center(child: CircularProgressIndicator())
+                  : _books.isEmpty
+                      ? const Center(child: Text('No books found.'))
+                      : GridView.builder(
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 10,
                         crossAxisSpacing: 8,
