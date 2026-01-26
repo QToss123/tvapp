@@ -1,7 +1,7 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
@@ -15,24 +15,22 @@ class ApiService {
   static const String productListEndpoint = '$baseUrl/product/list';
   static String courseDownloadEndpoint(int courseId) => '$baseUrl/courses/$courseId/download';
   
-  // Static values for API requests (for testing)
-  static const String staticLicenseValue = 'CLA-CL21-S10-28RZBFKP0T';
-  static const String staticDeviceId = '111114444444';
+  static const String _kDeviceIdPrefsKey = 'device_id';
 
-  /// Gets the device ID for license validation
+  /// Returns a stable device ID (dynamic). Generated once per app install,
+  /// stored in SharedPreferences, and reused for license/API calls.
   static Future<String> getDeviceId() async {
-
-    return '111114444444';
     try {
-      final deviceInfo = DeviceInfoPlugin();
-      if (defaultTargetPlatform == TargetPlatform.android) {
-        final androidInfo = await deviceInfo.androidInfo;
-        // Use Android ID as device identifier
-        return androidInfo.id;
+      final prefs = await SharedPreferences.getInstance();
+      var id = prefs.getString(_kDeviceIdPrefsKey);
+      if (id == null || id.isEmpty) {
+        id = 'tv_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(0xFFFFFFFF).toRadixString(16)}';
+        await prefs.setString(_kDeviceIdPrefsKey, id);
+        debugPrint('📱 Device ID (generated): $id');
       } else {
-        // Fallback for other platforms
-        return 'unknown-device';
+        debugPrint('📱 Device ID (stored): $id');
       }
+      return id;
     } catch (e) {
       debugPrint('Error getting device ID: $e');
       return 'error-device-id';
@@ -47,11 +45,9 @@ class ApiService {
       debugPrint('🔵 API CALL: validateLicense');
       debugPrint('═══════════════════════════════════════');
       
-      // Use static device ID
-      final deviceId = staticDeviceId;
-      
+      final deviceId = await getDeviceId();
       debugPrint('Validating license: $licenseValue');
-      debugPrint('Device ID (static): $deviceId');
+      debugPrint('Device ID (dynamic): $deviceId');
       debugPrint('Endpoint: $validateLicenseEndpoint');
 
       final response = await http.post(
@@ -154,11 +150,9 @@ class ApiService {
       debugPrint('🟢 API CALL: activateLicense');
       debugPrint('═══════════════════════════════════════');
       
-      // Use static device ID
-      final deviceId = staticDeviceId;
-      
+      final deviceId = await getDeviceId();
       debugPrint('Activating license: $licenseValue');
-      debugPrint('Device ID (static): $deviceId');
+      debugPrint('Device ID (dynamic): $deviceId');
       debugPrint('Using token: ${token.substring(0, 20)}...');
       debugPrint('Endpoint: $activateLicenseEndpoint');
       debugPrint('Authorization Header: Bearer ${token.substring(0, 20)}...');
@@ -267,14 +261,21 @@ class ApiService {
         };
       }
 
-      // Use static values for license_value and device_id
-      final licenseValue = staticLicenseValue;
-      final deviceId = staticDeviceId;
+      final licenseValue = await getStoredLicenseValue();
+      if (licenseValue == null || licenseValue.trim().isEmpty) {
+        debugPrint('❌ ERROR: No license value found');
+        return {
+          'success': false,
+          'message': 'No license found. Please activate license in Settings first.',
+          'products': <Map<String, dynamic>>[],
+        };
+      }
 
+      final deviceId = await getDeviceId();
       debugPrint('Fetching product list...');
       debugPrint('Using token: ${token.substring(0, 20)}...');
-      debugPrint('License value (static): $licenseValue');
-      debugPrint('Device ID (static): $deviceId');
+      debugPrint('License value (dynamic): $licenseValue');
+      debugPrint('Device ID (dynamic): $deviceId');
       debugPrint('Endpoint: $productListEndpoint');
 
       final requestBody = {
@@ -404,17 +405,23 @@ class ApiService {
         };
       }
 
-      // Use static values for license_value and device_id
-      final licenseValue = staticLicenseValue;
-      final deviceId = staticDeviceId;
+      final licenseValue = await getStoredLicenseValue();
+      if (licenseValue == null || licenseValue.trim().isEmpty) {
+        return {
+          'success': false,
+          'message': 'No license found. Please activate license in Settings first.',
+          'filePath': null,
+        };
+      }
 
+      final deviceId = await getDeviceId();
       debugPrint('═══════════════════════════════════════');
       debugPrint('🟣 API CALL: downloadCourse');
       debugPrint('═══════════════════════════════════════');
       debugPrint('Downloading course ID: $courseId...');
       debugPrint('Using token: ${token.substring(0, 20)}...');
-      debugPrint('License value (static): $licenseValue');
-      debugPrint('Device ID (static): $deviceId');
+      debugPrint('License value (dynamic): $licenseValue');
+      debugPrint('Device ID (dynamic): $deviceId');
 
       final requestBody = {
         'license_value': licenseValue,

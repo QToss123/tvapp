@@ -77,56 +77,20 @@ class _ReadingScreenState extends State<ReadingScreen> {
   }
 
   /// Sends TV remote key events to the WebView via JavaScript
-  /// This intercepts Flutter key events and forwards them to the HTML page
+  /// Up/Down/Left/Right -> move visible cursor. Enter -> click at cursor.
+  /// Shortcut: Left/Right also trigger prev/next when cursor is over reader area (optional).
   Future<void> _sendKeyToWeb(String direction) async {
     try {
-      // Map direction to keyCode
-      final keyCodeMap = {
-        'up': 38,
-        'down': 40,
-        'left': 37,
-        'right': 39,
-        'enter': 13,
-      };
+      debugPrint('🎮 [READING] Sending key to WebView: $direction');
       
-      final keyCode = keyCodeMap[direction] ?? 0;
-      if (keyCode == 0) {
-        debugPrint('⚠️ [READING] Unknown direction: $direction');
+      String jsCode;
+      if (direction == 'enter') {
+        jsCode = "if(window.__tvClickAtCursor) window.__tvClickAtCursor();";
+      } else if (direction == 'up' || direction == 'down' || direction == 'left' || direction == 'right') {
+        jsCode = "if(window.__tvMoveCursor) window.__tvMoveCursor('$direction');";
+      } else {
         return;
       }
-      
-      debugPrint('🎮 [READING] Sending key to WebView: $direction (keyCode: $keyCode)');
-      
-      // Inject JavaScript to simulate keyboard event in the HTML page
-      final jsCode = '''
-        (function() {
-          const keyCode = $keyCode;
-          // Create and dispatch keyboard event
-          const ev = new KeyboardEvent('keydown', {
-            keyCode: keyCode,
-            which: keyCode,
-            bubbles: true,
-            cancelable: true
-          });
-          
-          // Dispatch to both document and window
-          document.dispatchEvent(ev);
-          window.dispatchEvent(ev);
-          
-          // Also try to trigger on focused element
-          const focused = document.activeElement;
-          if (focused) {
-            focused.dispatchEvent(ev);
-          }
-          
-          // For Enter key, also trigger click on focused element
-          if (keyCode === 13) {
-            if (focused && (focused.tagName === 'A' || focused.tagName === 'BUTTON' || focused.onclick)) {
-              focused.click();
-            }
-          }
-        })();
-      ''';
       
       await _controller.runJavaScript(jsCode);
     } catch (e) {
@@ -134,47 +98,56 @@ class _ReadingScreenState extends State<ReadingScreen> {
     }
   }
 
-  /// Injects JavaScript to enable keyboard/D-pad navigation in the HTML content
+  /// Injects JavaScript: visible TV cursor, focus styles, and prev/next mapping
   Future<void> _enableKeyboardNavigation() async {
     try {
-      // Inject JavaScript to make the page focusable and enable keyboard navigation
-      const jsCode = '''
+      const jsCode = r'''
         (function() {
-          // Make body focusable
-          if (document.body) {
-            document.body.setAttribute('tabindex', '0');
-            if (!document.activeElement || document.activeElement === document.body) {
-              document.body.focus();
-            }
+          var step = 32;
+          var cursor = document.createElement('div');
+          cursor.id = 'tv-cursor';
+          cursor.style.cssText = 'position:fixed;width:28px;height:28px;border-radius:50%;border:3px solid #4F46E5;background:rgba(79,70,229,0.2);pointer-events:none;z-index:2147483647;left:50%;top:50%;transform:translate(-50%,-50%);transition:left 0.05s, top 0.05s;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+          document.body.appendChild(cursor);
+          var r = cursor.getBoundingClientRect();
+          var x = (window.innerWidth / 2) - 14;
+          var y = (window.innerHeight / 2) - 14;
+          function updateCursor() {
+            cursor.style.left = Math.max(0, Math.min(window.innerWidth - 28, x)) + 'px';
+            cursor.style.top = Math.max(0, Math.min(window.innerHeight - 28, y)) + 'px';
+            cursor.style.transform = 'none';
           }
-          
-          // Enable keyboard navigation for all interactive elements
-          const interactiveElements = document.querySelectorAll('a, button, input, select, textarea, [tabindex], [onclick]');
-          interactiveElements.forEach(function(el) {
-            if (!el.hasAttribute('tabindex')) {
-              el.setAttribute('tabindex', '0');
-            }
-          });
-          
-          // Handle keyboard events
-          document.addEventListener('keydown', function(e) {
-            // Handle Enter key (D-pad center button)
-            if (e.key === 'Enter' || e.keyCode === 13) {
-              const focused = document.activeElement;
-              if (focused && (focused.tagName === 'A' || focused.tagName === 'BUTTON' || focused.onclick)) {
-                focused.click();
-                e.preventDefault();
-                e.stopPropagation();
+          updateCursor();
+          window.__tvMoveCursor = function(dir) {
+            if (dir === 'up') y -= step;
+            else if (dir === 'down') y += step;
+            else if (dir === 'left') x -= step;
+            else if (dir === 'right') x += step;
+            updateCursor();
+          };
+          window.__tvClickAtCursor = function() {
+            var cx = x + 14;
+            var cy = y + 14;
+            var el = document.elementFromPoint(cx, cy);
+            while (el && el !== document.body) {
+              var tag = (el.tagName || '').toLowerCase();
+              if (tag === 'a' || tag === 'button' || el.onclick || el.getAttribute('onclick') || el.classList.contains('btn-control') || el.classList.contains('header-btn') || el.id === 'btn-prev' || el.id === 'btn-next') {
+                el.click();
+                return;
               }
+              el = el.parentElement;
             }
-          });
-          
-          console.log('Keyboard navigation enabled for TV remote');
+            if (el && el !== document.body) el.click();
+          };
+          var style = document.createElement('style');
+          style.textContent = '*:focus { outline: 3px solid #4F46E5 !important; outline-offset: 2px !important; }';
+          document.head.appendChild(style);
+          var btns = document.querySelectorAll('a, button, input, [tabindex], [onclick]');
+          btns.forEach(function(el) { if (!el.tabIndex) el.setAttribute('tabindex', '0'); });
+          console.log('TV cursor and keyboard nav enabled');
         })();
       ''';
-      
       await _controller.runJavaScript(jsCode);
-      debugPrint('✅ [READING] Keyboard navigation enabled in HTML');
+      debugPrint('✅ [READING] TV cursor and keyboard navigation enabled');
     } catch (e) {
       debugPrint('⚠️ [READING] Error enabling keyboard navigation: $e');
     }

@@ -51,8 +51,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      // Set default test license if no license is saved
-      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'CLA-CL21-S10-28RZBFKP0T';
+      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'CLA-CL62-S46-EN610E41YR';
       _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
       _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';
@@ -743,7 +742,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           maxLength: 24,
                           decoration: InputDecoration(
                             labelText: 'License Number',
-                            hintText: 'CLA-CL21-S10-28RZBFKP0T (Default test license)',
+                            hintText: 'Enter your license number',
                             border: const OutlineInputBorder(),
                             prefixIcon: const Icon(Icons.vpn_key),
                             suffixIcon: _isLicenseActivated
