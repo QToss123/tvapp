@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
+import 'package:tv_app_books/models/book_download_response.dart';
 
 /// API Service for handling license validation and other API calls
 class ApiService {
@@ -16,12 +17,17 @@ class ApiService {
   static String courseDownloadEndpoint(int courseId) => '$baseUrl/courses/$courseId/download';
   
   static const String _kDeviceIdPrefsKey = 'device_id';
+  static const String _forcedDeviceId = 'tv_1769437510714_3f65d0e1';
 
   /// Returns a stable device ID (dynamic). Generated once per app install,
   /// stored in SharedPreferences, and reused for license/API calls.
   static Future<String> getDeviceId() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      // Force device ID override when requested
+      await prefs.setString(_kDeviceIdPrefsKey, _forcedDeviceId);
+      debugPrint('📱 Device ID (forced): $_forcedDeviceId');
+      return _forcedDeviceId;
       var id = prefs.getString(_kDeviceIdPrefsKey);
       if (id == null || id.isEmpty) {
         id = 'tv_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(0xFFFFFFFF).toRadixString(16)}';
@@ -398,6 +404,7 @@ class ApiService {
       final token = await getStoredToken();
 
       if (token == null || token.isEmpty) {
+        debugPrint('❌ Download failed: No authorization token. Activate license in Settings first.');
         return {
           'success': false,
           'message': 'No authorization token found. Please activate license first.',
@@ -407,6 +414,7 @@ class ApiService {
 
       final licenseValue = await getStoredLicenseValue();
       if (licenseValue == null || licenseValue.trim().isEmpty) {
+        debugPrint('❌ Download failed: No license. Set license in Settings first.');
         return {
           'success': false,
           'message': 'No license found. Please activate license in Settings first.',
@@ -431,6 +439,13 @@ class ApiService {
       debugPrint('Course download request body: ${jsonEncode(requestBody)}');
       debugPrint('Endpoint: ${courseDownloadEndpoint(courseId)}');
 
+      // Print curl for manual testing
+      final curlApi = "curl -X GET '${courseDownloadEndpoint(courseId)}' \\\n"
+          "  -H 'Content-Type: application/json' \\\n"
+          "  -H 'Authorization: Bearer $token' \\\n"
+          "  -d '${jsonEncode(requestBody)}'";
+      debugPrint('📎 CURL (get download URL):\n$curlApi');
+
       // Use GET request with body as shown in the curl command
       final request = http.Request(
         'GET',
@@ -452,13 +467,13 @@ class ApiService {
       debugPrint('Course download response body: ${response.body}');
 
       if (response.statusCode == 200) {
-        // Parse the response to get download_url
-        final responseData = jsonDecode(response.body);
-        final downloadUrl = responseData['download_url'] as String?;
-        final courseIdFromResponse = responseData['course_id'];
+        final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+        final downloadResponse = BookDownloadResponse.fromJson(responseData);
+        final downloadUrl = downloadResponse.downloadUrl;
         final fileKey = responseData['file_key'] as String?;
-        
-        if (downloadUrl == null || downloadUrl.isEmpty) {
+        final keys = downloadResponse.bookEncryptionKeys;
+
+        if (downloadUrl.isEmpty) {
           return {
             'success': false,
             'message': 'No download URL received from server',
@@ -466,29 +481,27 @@ class ApiService {
           };
         }
 
-        debugPrint('Download URL received: ${downloadUrl.substring(0, 50)}...');
-        
+        debugPrint('Download URL received: ${downloadUrl.substring(0, downloadUrl.length > 50 ? 50 : downloadUrl.length)}...');
+        if (keys != null) {
+          debugPrint('🔐 Encrypted book: ${keys.bookId}');
+        }
+
         // Use target directory if provided (external storage), otherwise use app documents
         String coursesDir;
         if (targetDirectory != null && targetDirectory.isNotEmpty) {
-          // Use the selected external storage location
           coursesDir = path.join(targetDirectory, 'courses');
         } else {
-          // Fallback to app documents directory
           final Directory? appDocDir = await getExternalStorageDirectory();
-          final String downloadDir = appDocDir?.path ?? 
-                                    (await getApplicationDocumentsDirectory()).path;
+          final String downloadDir = appDocDir?.path ??
+              (await getApplicationDocumentsDirectory()).path;
           coursesDir = path.join(downloadDir, 'courses');
         }
-        
+
         final Directory coursesDirectory = Directory(coursesDir);
-        
-        // Create directory if it doesn't exist
         if (!await coursesDirectory.exists()) {
           await coursesDirectory.create(recursive: true);
         }
 
-        // Determine file extension from download_url or file_key
         String extension = '.zip';
         if (fileKey != null && fileKey.contains('.')) {
           extension = path.extension(fileKey);
@@ -502,28 +515,26 @@ class ApiService {
         final String filePath = path.join(coursesDir, fileName);
         final File file = File(filePath);
 
-        // Delete existing file if it exists
+        debugPrint('📎 CURL (download file): curl -o "$fileName" "$downloadUrl"');
+
         if (await file.exists()) {
           await file.delete();
         }
 
-        // Download the actual file from download_url
-        debugPrint('Downloading file from URL: $downloadUrl');
-        final downloadRequest = await http.Client().send(http.Request('GET', Uri.parse(downloadUrl)));
-        
-        // Get content length for progress tracking
+        // Download file directly (encrypted files remain encrypted)
+        debugPrint('Downloading file from URL...');
+        final downloadRequest = await http.Client().send(
+            http.Request('GET', Uri.parse(downloadUrl)));
         final contentLength = downloadRequest.contentLength;
         int downloadedBytes = 0;
-
-        // Write file with progress tracking
         final sink = file.openWrite();
         await for (final chunk in downloadRequest.stream) {
           sink.add(chunk);
           downloadedBytes += chunk.length;
-          
-          if (contentLength != null && contentLength > 0 && onProgress != null) {
-            final progress = ((downloadedBytes / contentLength) * 100).round();
-            onProgress(progress);
+          if (contentLength != null &&
+              contentLength > 0 &&
+              onProgress != null) {
+            onProgress(((downloadedBytes / contentLength) * 100).round());
           }
         }
         await sink.close();
@@ -531,24 +542,30 @@ class ApiService {
         debugPrint('Course downloaded successfully to: $filePath');
         debugPrint('File size: ${await file.length()} bytes');
 
-        debugPrint('Course downloaded successfully to: $filePath');
-        debugPrint('File size: ${await file.length()} bytes');
-
+        debugPrint('🔐 Enc keys from download API: bookId=${keys?.bookId} '
+            'keyEncB64=${keys?.keyEncB64 != null ? '***' : 'null'} '
+            'keyNonceB64=${keys?.keyNonceB64 != null ? '***' : 'null'}');
         return {
           'success': true,
           'filePath': filePath,
           'message': 'Course downloaded successfully',
+          'isEncrypted': keys != null,
+          'encBookId': keys?.bookId,
+          'encKeyB64': keys?.keyEncB64,
+          'encNonceB64': keys?.keyNonceB64,
+          'encBookPath': keys?.encBookPath,
         };
       } else {
-        // Handle error responses
+        debugPrint('❌ Download API error: status=${response.statusCode} body=${response.body}');
         try {
-          final errorData = jsonDecode(response.body);
+          final errorData = jsonDecode(response.body) as Map<String, dynamic>?;
+          final msg = errorData?['message'] ?? errorData?['error'] ?? 'Failed to download course';
           return {
             'success': false,
-            'message': errorData['message'] ?? errorData['error'] ?? 'Failed to download course',
+            'message': msg is String ? msg : 'Failed to download course',
             'filePath': null,
           };
-        } catch (e) {
+        } catch (_) {
           return {
             'success': false,
             'message': 'Server error: ${response.statusCode}',
@@ -556,8 +573,9 @@ class ApiService {
           };
         }
       }
-    } catch (e) {
-      debugPrint('Error downloading course: $e');
+    } catch (e, st) {
+      debugPrint('❌ Error downloading course: $e');
+      debugPrint('$st');
       return {
         'success': false,
         'message': 'Network error: $e',

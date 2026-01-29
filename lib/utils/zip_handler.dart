@@ -28,8 +28,7 @@ class ZipHandler {
       final archive = ZipDecoder().decodeBytes(bytes);
 
       // Get temporary directory for extraction
-      final tempDir = await getTemporaryDirectory();
-      final extractDir = Directory(path.join(tempDir.path, 'extracted_books', path.basenameWithoutExtension(zipFilePath)));
+      final extractDir = await _getExtractDir(zipFilePath);
       
       // Create extraction directory if it doesn't exist
       if (await extractDir.exists()) {
@@ -105,6 +104,16 @@ class ZipHandler {
       return (path: filePath, wasExtracted: false);
     }
 
+    // Reuse previously extracted folder if it exists and has index.html
+    final extractDir = await _getExtractDir(filePath);
+    if (await extractDir.exists()) {
+      final existingIndex = await findIndexHtml(extractDir.path);
+      if (existingIndex != null) {
+        debugPrint('Reusing existing extracted folder: ${extractDir.path}');
+        return (path: existingIndex, wasExtracted: false);
+      }
+    }
+
     // It's a ZIP file, extract it
     debugPrint('File is a ZIP, extracting...');
     final extractedPath = await extractZipFile(filePath);
@@ -124,5 +133,16 @@ class ZipHandler {
       // The existing code will handle finding index.html
       return (path: extractedPath, wasExtracted: true);
     }
+  }
+
+  static Future<Directory> _getExtractDir(String zipFilePath) async {
+    final tempDir = await getTemporaryDirectory();
+    return Directory(
+      path.join(
+        tempDir.path,
+        'extracted_books',
+        path.basenameWithoutExtension(zipFilePath),
+      ),
+    );
   }
 }

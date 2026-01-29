@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -24,6 +25,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const _kSyncType = 'syncType';
   static const _kStorageLocation = 'storageLocation';
   static const _kSyncCompleted = 'syncCompleted';
+  static const _kTVCursorEnabled = 'tv_cursor_enabled';
 
   final TextEditingController _licenseController = TextEditingController();
   final FocusNode _licenseFocusNode = FocusNode();
@@ -31,6 +33,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isLicenseActivated = false;
   String _syncType = 'online';
   String _storageLocation = 'Not selected';
+  bool _tvCursorEnabled = true;
 
   final List<String> _syncTypes = ['online', 'from external'];
 
@@ -50,11 +53,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
+    final tvCursor = prefs.getBool(_kTVCursorEnabled) ?? Platform.isAndroid;
     setState(() {
-      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'CLA-CL62-S46-EN610E41YR';
+      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'TES-CL94-S66-0LWS4TCTDB';
       _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
       _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';
+      _tvCursorEnabled = tvCursor;
     });
   }
 
@@ -388,6 +393,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.remove(_kSyncType);
     await prefs.remove(_kStorageLocation);
     await prefs.remove(_kSyncCompleted);
+    await prefs.remove(_kTVCursorEnabled);
     
     // Clear local database (all books)
     try {
@@ -410,6 +416,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _isLicenseActivated = false;
       _syncType = 'online';
       _storageLocation = 'Not selected';
+      _tvCursorEnabled = Platform.isAndroid;
     });
     
     debugPrint('✅ All settings and local database reset to default');
@@ -933,6 +940,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
+          if (Platform.isAndroid) ...[
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Reading / TV',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Show TV navigation cursor (D-pad overlay)',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey.shade800,
+                            ),
+                          ),
+                        ),
+                        Switch(
+                          value: _tvCursorEnabled,
+                          onChanged: (bool value) async {
+                            setState(() => _tvCursorEnabled = value);
+                            final prefs = await SharedPreferences.getInstance();
+                            await prefs.setBool(_kTVCursorEnabled, value);
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
 
           // Action Buttons

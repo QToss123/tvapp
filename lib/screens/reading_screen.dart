@@ -2,11 +2,15 @@ import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import '../models/book.dart';
 import '../utils/zip_handler.dart';
+import '../services/database_service.dart';
+import '../utils/decrypt_util.dart';
+import 'package:flutter/foundation.dart';
 
 /// Intent for TV remote key directions
 class DirectionIntent extends Intent {
@@ -27,31 +31,44 @@ class ReadingScreen extends StatefulWidget {
 }
 
 class _ReadingScreenState extends State<ReadingScreen> {
+  static const _kTVCursorEnabled = 'tv_cursor_enabled';
+
   late final WebViewController _controller;
   bool _isLoading = true;
   String? _error;
-  HttpServer? _localServer; // Local HTTP server for serving book files
-  int _serverPort = 8080; // Port for local server
-  final FocusNode _webViewFocusNode = FocusNode(); // Focus node for WebView (TV navigation)
+  HttpServer? _localServer;
+  int _serverPort = 8080;
+  final FocusNode _webViewFocusNode = FocusNode();
+  String? _decryptedCachePath;
+  /// When true: TV cursor + D-pad key forwarding (Android TV). When false: plain WebView, no cursor (e.g. Windows).
+  bool _useTvCursor = false;
 
   @override
   void initState() {
     super.initState();
     _initializeWebView();
-    // Request focus after first frame (for TV navigation)
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _webViewFocusNode.requestFocus();
-        debugPrint('🎮 [READING] WebView focus requested on init');
+    _loadTvCursorSetting();
+  }
+
+  Future<void> _loadTvCursorSetting() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final explicit = prefs.getBool(_kTVCursorEnabled);
+      final bool use = explicit ?? Platform.isAndroid;
+      if (mounted && _useTvCursor != use) {
+        setState(() => _useTvCursor = use);
+      } else {
+        _useTvCursor = use;
       }
-    });
+    } catch (_) {
+      _useTvCursor = Platform.isAndroid;
+    }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Request focus when screen becomes visible (for TV navigation)
-    if (!_isLoading && _error == null) {
+    if (_useTvCursor && !_isLoading && _error == null) {
       _requestWebViewFocus();
     }
   }
@@ -60,6 +77,18 @@ class _ReadingScreenState extends State<ReadingScreen> {
   void dispose() {
     // Stop local HTTP server
     _stopLocalServer();
+    // Delete decrypted file from app cache (best-effort)
+    if (_decryptedCachePath != null) {
+      try {
+        final f = File(_decryptedCachePath!);
+        if (f.existsSync()) {
+          f.deleteSync();
+          debugPrint('🧹 [READING] Deleted decrypted cache file: $_decryptedCachePath');
+        }
+      } catch (e) {
+        debugPrint('⚠️ [READING] Failed to delete decrypted cache file: $e');
+      }
+    }
     // Dispose focus node
     _webViewFocusNode.dispose();
     super.dispose();
@@ -98,6 +127,44 @@ class _ReadingScreenState extends State<ReadingScreen> {
     }
   }
 
+  /// Injects fixes for page-jump input (Enter to apply) and responsive zoom.
+  /// Runs on every page load regardless of TV cursor.
+  Future<void> _injectBookFixes() async {
+    try {
+      const jsCode = r'''
+        (function() {
+          var inp = document.getElementById('page-jump-input');
+          if (inp) {
+            inp.addEventListener('keydown', function(e) {
+              if (e.key === 'Enter' || e.keyCode === 13) {
+                e.preventDefault();
+                this.blur();
+                this.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+            });
+          }
+          var s = document.createElement('style');
+          s.id = 'reader-responsive-fixes';
+          s.textContent = [
+            '#reader-view { max-width: 100vw; min-width: 0; box-sizing: border-box; overflow: auto !important; -webkit-overflow-scrolling: touch; }',
+            '#reader-content { max-width: 100%; min-width: 0; box-sizing: border-box; overflow: auto !important; }',
+            '.view-mode-single .page-container, .view-mode-double .page-container { max-width: 100% !important; box-sizing: border-box; }',
+            '.page-container canvas, .page-container img { max-width: 100% !important; height: auto !important; object-fit: contain !important; }',
+            'html, body { max-width: 100vw; overflow-x: hidden; overflow-y: auto !important; box-sizing: border-box; }',
+            '#app { max-width: 100vw; min-width: 0; overflow-x: hidden; box-sizing: border-box; }',
+            '#reader-content { padding-bottom: 120px !important; }',
+            '#reader-view { padding-bottom: 0 !important; }'
+          ].join('\n');
+          if (!document.getElementById('reader-responsive-fixes')) document.head.appendChild(s);
+        })();
+      ''';
+      await _controller.runJavaScript(jsCode);
+      debugPrint('✅ [READING] Book fixes (page-jump, responsive) injected');
+    } catch (e) {
+      debugPrint('⚠️ [READING] Error injecting book fixes: $e');
+    }
+  }
+
   /// Injects JavaScript: visible TV cursor, focus styles, and prev/next mapping
   Future<void> _enableKeyboardNavigation() async {
     try {
@@ -130,7 +197,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
             var el = document.elementFromPoint(cx, cy);
             while (el && el !== document.body) {
               var tag = (el.tagName || '').toLowerCase();
-              if (tag === 'a' || tag === 'button' || el.onclick || el.getAttribute('onclick') || el.classList.contains('btn-control') || el.classList.contains('header-btn') || el.id === 'btn-prev' || el.id === 'btn-next') {
+              if (tag === 'a' || tag === 'button' || tag === 'input' || el.onclick || el.getAttribute('onclick') || el.classList.contains('btn-control') || el.classList.contains('header-btn') || el.id === 'btn-prev' || el.id === 'btn-next' || el.id === 'page-jump-input') {
                 el.click();
                 return;
               }
@@ -191,10 +258,11 @@ class _ReadingScreenState extends State<ReadingScreen> {
             setState(() {
               _isLoading = false;
             });
-            // Request focus on WebView after page loads (for TV remote navigation)
-            _requestWebViewFocus();
-            // Inject JavaScript to enable keyboard/D-pad navigation in HTML
-            _enableKeyboardNavigation();
+            _injectBookFixes();
+            if (_useTvCursor) {
+              _requestWebViewFocus();
+              _enableKeyboardNavigation();
+            }
           },
           onWebResourceError: (WebResourceError error) {
             // Only show error for main page load, ignore resource errors (they're logged but not critical)
@@ -239,11 +307,14 @@ class _ReadingScreenState extends State<ReadingScreen> {
         _loadAsset(contentUrl);
       }
     } else {
-      // Load a placeholder HTML if no URL is provided
-      debugPrint('No contentUrl provided, loading placeholder');
-      _controller.loadHtmlString(_getPlaceholderHtml());
+      // No contentUrl (e.g. book not downloaded yet). Avoid loadHtmlString - it
+      // uses loadDataWithBaseURL which crashes on some Android TV WebViews (MiTV etc).
+      debugPrint('No contentUrl provided, showing error (avoiding loadHtmlString)');
+      _controller.loadRequest(Uri.parse('about:blank'));
       setState(() {
         _isLoading = false;
+        _error = 'No content URL. This book may not have been fully downloaded.\n\n'
+            'Go to Sync to download books, then try again.';
       });
     }
   }
@@ -283,8 +354,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
   }
 
   Future<void> _loadAsset(String assetPath) async {
+    await _loadTvCursorSetting();
     debugPrint('Loading asset: $assetPath');
-    
     try {
       // Load HTML as string to inject base tag for proper relative resource resolution
       // This ensures CSS, JS (including PDF.js), and other resources load correctly
@@ -361,7 +432,109 @@ class _ReadingScreenState extends State<ReadingScreen> {
   /// Cleans up the copied folder when done
   Future<void> _loadFile(String fileUrl) async {
     try {
+      await _loadTvCursorSetting();
       debugPrint('📂 [READING] Loading file from external storage: $fileUrl');
+
+      // Step-wise dialog (decrypt -> unzip -> open)
+      const dialogSteps = <String>[
+        'Checking file',
+        'Decrypting',
+        'Unzipping',
+        'Starting reader',
+      ];
+      String dialogMessage = 'Preparing...';
+      String? dialogError;
+      int currentStepIndex = 0;
+      bool dialogOpen = false;
+      StateSetter? dialogSetState;
+      Future<void> updateDialog({
+        required String stepKey,
+        required String message,
+        String? error,
+      }) async {
+        dialogMessage = message;
+        dialogError = error;
+        final idx = dialogSteps.indexWhere(
+          (s) => s.toLowerCase().startsWith(stepKey.toLowerCase()),
+        );
+        if (idx >= 0) {
+          currentStepIndex = idx;
+        }
+        if (!mounted) return;
+        if (!dialogOpen) {
+          dialogOpen = true;
+          // ignore: use_build_context_synchronously
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) {
+              return StatefulBuilder(
+                builder: (context, setState) {
+                  dialogSetState = setState;
+                  return AlertDialog(
+                    title: const Text('Opening book'),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          dialogMessage,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 12),
+                        const LinearProgressIndicator(minHeight: 4),
+                        const SizedBox(height: 12),
+                        for (var i = 0; i < dialogSteps.length; i++)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  i < currentStepIndex
+                                      ? Icons.check_circle
+                                      : i == currentStepIndex
+                                          ? Icons.radio_button_checked
+                                          : Icons.radio_button_unchecked,
+                                  size: 18,
+                                  color: i < currentStepIndex
+                                      ? Colors.green
+                                      : i == currentStepIndex
+                                          ? Colors.blue
+                                          : Colors.grey,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(dialogSteps[i]),
+                              ],
+                            ),
+                          ),
+                        if (dialogError != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            dialogError!,
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                        ],
+                      ],
+                    ),
+                    actions: dialogError != null
+                        ? [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('Close'),
+                            ),
+                          ]
+                        : const [],
+                  );
+                },
+              );
+            },
+          );
+        } else {
+          if (dialogSetState != null) {
+            dialogSetState!(() {});
+          }
+        }
+      }
       
       // Parse the file:// URL
       final uri = Uri.parse(fileUrl);
@@ -369,14 +542,100 @@ class _ReadingScreenState extends State<ReadingScreen> {
       var file = File(filePath);
       
       // Check if file exists
-      if (!await file.exists()) {
+      await updateDialog(stepKey: 'Checking file', message: 'Checking file...');
+      final fileExists = await file.exists();
+
+      // Log encrypted file existence on open (both success and failure)
+      final isZip = filePath.toLowerCase().endsWith('.zip');
+      if (isZip) {
+        debugPrint('🔎 [READING] Encrypted file check: path=$filePath exists=$fileExists');
+      }
+
+      if (!fileExists) {
+        await updateDialog(
+          stepKey: 'Checking file',
+          message: 'File not found',
+          error: 'File not found: $filePath',
+        );
         throw Exception('File not found: $filePath');
+      }
+
+      // Always load encryption keys from local DB (book-wise) if available
+      final dbBook = await DatabaseService.getBookByFilePath(filePath);
+      final encBookId = dbBook?.encBookId ?? widget.book.encBookId;
+      final encKeyB64 = dbBook?.encKeyB64 ?? widget.book.encKeyB64;
+      final encNonceB64 = dbBook?.encNonceB64 ?? widget.book.encNonceB64;
+      if (dbBook != null) {
+        debugPrint('🔐 [READING] Using enc keys from local DB for file: $filePath');
+      } else {
+        debugPrint('🔐 [READING] DB lookup not found, using widget book keys');
+      }
+
+      // If encrypted metadata exists, decrypt via util (on book click), then unzip/open extracted location
+      final hasEncMeta = (encBookId != null && encBookId.isNotEmpty) ||
+          (encKeyB64 != null && encKeyB64.isNotEmpty) ||
+          (encNonceB64 != null && encNonceB64.isNotEmpty);
+      if (hasEncMeta) {
+        final decryptedAvailable = await isDecryptedFileAvailable(
+          encryptedFilePath: filePath,
+          encBookId: encBookId ?? '',
+        );
+        debugPrint('🔐 [READING] Decrypted file available before decrypt: $decryptedAvailable');
+
+        await updateDialog(
+          stepKey: 'Decrypting',
+          message: decryptedAvailable ? 'Using decrypted file...' : 'Decrypting encrypted file...',
+        );
+        try {
+          final result = await decryptBookFileIfNeeded(
+            encryptedFilePath: filePath,
+            encBookId: encBookId,
+            encKeyB64: encKeyB64,
+            encNonceB64: encNonceB64,
+          );
+          filePath = result.pathToUse;
+          _decryptedCachePath = result.pathToUse;
+          file = File(filePath);
+          final decryptedSize = await file.length();
+
+          if (result.reusedExisting) {
+            debugPrint('🔐 [READING] File decrypted: yes (reused existing, $decryptedSize bytes)');
+            await updateDialog(
+              stepKey: 'Decrypting',
+              message: 'Decrypt complete (reused, $decryptedSize bytes)',
+            );
+          } else {
+            debugPrint('🔐 [READING] File decrypted: yes (just decrypted, $decryptedSize bytes)');
+            await updateDialog(
+              stepKey: 'Decrypting',
+              message: 'Decrypt complete ($decryptedSize bytes)',
+            );
+          }
+        } catch (e) {
+          await updateDialog(
+            stepKey: 'Decrypting',
+            message: 'Decryption failed',
+            error: e.toString(),
+          );
+          rethrow;
+        }
       }
       
       // Check if file is a ZIP and extract it if necessary
+      await updateDialog(stepKey: 'Unzipping', message: 'Unzipping book...');
       debugPrint('📦 [READING] Checking if file is a ZIP: $filePath');
-      final processed = await ZipHandler.processBookFile(filePath);
-      filePath = processed.path;
+      ({String path, bool wasExtracted}) processed;
+      try {
+        processed = await ZipHandler.processBookFile(filePath);
+        filePath = processed.path;
+      } on FormatException catch (e) {
+        await updateDialog(
+          stepKey: 'Unzipping',
+          message: 'Unzip failed',
+          error: 'Invalid ZIP file (possibly corrupted/decryption failed).\n$e',
+        );
+        rethrow;
+      }
       
       if (processed.wasExtracted) {
         debugPrint('📦 [READING] ZIP file was extracted to: $filePath');
@@ -412,6 +671,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
       debugPrint('📂 [READING] Book directory: ${bookDirectory.path}');
       debugPrint('📄 [READING] Index HTML: $indexHtmlPath');
       
+      await updateDialog(stepKey: 'Starting reader', message: 'Starting reader...');
       // Start local HTTP server to serve book files
       debugPrint('🚀 [READING] Starting local HTTP server...');
       await _startLocalServer(bookDirectory);
@@ -427,6 +687,12 @@ class _ReadingScreenState extends State<ReadingScreen> {
       debugPrint('✅ [READING] All resources (CSS, JS, audio) will load via HTTP server');
       
       await _controller.loadRequest(Uri.parse(bookUrl));
+
+      if (dialogOpen && Navigator.canPop(context)) {
+        // Close dialog on success
+        // ignore: use_build_context_synchronously
+        Navigator.pop(context);
+      }
       
       debugPrint('✅ [READING] Successfully loaded book via local HTTP server');
       setState(() {
@@ -600,29 +866,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.book.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Reload',
-            onPressed: () {
-              if (widget.book.contentUrl != null &&
-                  widget.book.contentUrl!.isNotEmpty) {
-                _controller.reload();
-              } else {
-                _controller.loadHtmlString(_getPlaceholderHtml());
-              }
-            },
-          ),
-        ],
-        // Prevent AppBar from stealing focus on TV
-        automaticallyImplyLeading: false,
-      ),
       body: Stack(
         children: [
           if (_error != null)
@@ -651,47 +894,57 @@ class _ReadingScreenState extends State<ReadingScreen> {
                     onPressed: () {
                       if (widget.book.contentUrl != null &&
                           widget.book.contentUrl!.isNotEmpty) {
+                        setState(() => _error = null);
                         _controller.reload();
                       } else {
-                        _controller.loadHtmlString(_getPlaceholderHtml());
+                        Navigator.maybePop(context);
                       }
                     },
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Retry'),
+                    icon: Icon(
+                      widget.book.contentUrl != null &&
+                              widget.book.contentUrl!.isNotEmpty
+                          ? Icons.refresh
+                          : Icons.arrow_back,
+                    ),
+                    label: Text(
+                      widget.book.contentUrl != null &&
+                              widget.book.contentUrl!.isNotEmpty
+                          ? 'Retry'
+                          : 'Go back',
+                    ),
                   ),
                 ],
               ),
             )
           else
-            // Intercept TV remote keys and forward to WebView
-            Shortcuts(
-              shortcuts: <LogicalKeySet, Intent>{
-                // D-pad navigation
-                LogicalKeySet(LogicalKeyboardKey.arrowUp): const DirectionIntent('up'),
-                LogicalKeySet(LogicalKeyboardKey.arrowDown): const DirectionIntent('down'),
-                LogicalKeySet(LogicalKeyboardKey.arrowLeft): const DirectionIntent('left'),
-                LogicalKeySet(LogicalKeyboardKey.arrowRight): const DirectionIntent('right'),
-                // Enter/Select button
-                LogicalKeySet(LogicalKeyboardKey.select): const DirectionIntent('enter'),
-                LogicalKeySet(LogicalKeyboardKey.enter): const DirectionIntent('enter'),
-              },
-              child: Actions(
-                actions: <Type, Action<Intent>>{
-                  DirectionIntent: CallbackAction<DirectionIntent>(
-                    onInvoke: (intent) {
-                      _sendKeyToWeb(intent.dir);
-                      return null;
+            _useTvCursor
+                ? Shortcuts(
+                    shortcuts: <LogicalKeySet, Intent>{
+                      LogicalKeySet(LogicalKeyboardKey.arrowUp): const DirectionIntent('up'),
+                      LogicalKeySet(LogicalKeyboardKey.arrowDown): const DirectionIntent('down'),
+                      LogicalKeySet(LogicalKeyboardKey.arrowLeft): const DirectionIntent('left'),
+                      LogicalKeySet(LogicalKeyboardKey.arrowRight): const DirectionIntent('right'),
+                      LogicalKeySet(LogicalKeyboardKey.select): const DirectionIntent('enter'),
+                      LogicalKeySet(LogicalKeyboardKey.enter): const DirectionIntent('enter'),
                     },
-                  ),
-                },
-                child: Focus(
-                  focusNode: _webViewFocusNode,
-                  autofocus: true,
-                  skipTraversal: false,
-                  child: WebViewWidget(controller: _controller),
-                ),
-              ),
-            ),
+                    child: Actions(
+                      actions: <Type, Action<Intent>>{
+                        DirectionIntent: CallbackAction<DirectionIntent>(
+                          onInvoke: (intent) {
+                            _sendKeyToWeb(intent.dir);
+                            return null;
+                          },
+                        ),
+                      },
+                      child: Focus(
+                        focusNode: _webViewFocusNode,
+                        autofocus: true,
+                        skipTraversal: false,
+                        child: WebViewWidget(controller: _controller),
+                      ),
+                    ),
+                  )
+                : WebViewWidget(controller: _controller),
           if (_isLoading && _error == null)
             Container(
               color: Colors.white,
@@ -706,6 +959,20 @@ class _ReadingScreenState extends State<ReadingScreen> {
                 ),
               ),
             ),
+          Positioned(
+            left: 16,
+            top: MediaQuery.of(context).size.height * 0.45,
+            child: Material(
+              color: Colors.black54,
+              shape: const CircleBorder(),
+              child: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                color: Colors.white,
+                tooltip: 'Back',
+                onPressed: () => Navigator.maybePop(context),
+              ),
+            ),
+          ),
         ],
       ),
     );

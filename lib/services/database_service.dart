@@ -9,7 +9,7 @@ import '../models/book.dart';
 class DatabaseService {
   static Database? _database;
   static const String _databaseName = 'books.db';
-  static const int _databaseVersion = 1;
+  static const int _databaseVersion = 2;
   
   static const String _tableBooks = 'books';
   
@@ -21,6 +21,9 @@ class DatabaseService {
   static const String _colThumbnail = 'thumbnail';
   static const String _colContentUrl = 'content_url';
   static const String _colFilePath = 'file_path';
+  static const String _colEncBookId = 'enc_book_id';
+  static const String _colEncKeyB64 = 'enc_key_b64';
+  static const String _colEncNonceB64 = 'enc_nonce_b64';
   static const String _colCourseId = 'course_id';
   static const String _colSyncedAt = 'synced_at';
   static const String _colCreatedAt = 'created_at';
@@ -57,6 +60,9 @@ class DatabaseService {
         $_colThumbnail TEXT,
         $_colContentUrl TEXT,
         $_colFilePath TEXT,
+        $_colEncBookId TEXT,
+        $_colEncKeyB64 TEXT,
+        $_colEncNonceB64 TEXT,
         $_colSyncedAt INTEGER,
         $_colCreatedAt INTEGER NOT NULL
       )
@@ -75,7 +81,9 @@ class DatabaseService {
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     // Handle database upgrades here
     if (oldVersion < 2) {
-      // Add any new columns or tables
+      await db.execute('ALTER TABLE $_tableBooks ADD COLUMN $_colEncBookId TEXT');
+      await db.execute('ALTER TABLE $_tableBooks ADD COLUMN $_colEncKeyB64 TEXT');
+      await db.execute('ALTER TABLE $_tableBooks ADD COLUMN $_colEncNonceB64 TEXT');
     }
   }
 
@@ -105,6 +113,9 @@ class DatabaseService {
       _colThumbnail: book.thumbnail,
       _colContentUrl: book.contentUrl,
       _colFilePath: filePath,
+      _colEncBookId: book.encBookId,
+      _colEncKeyB64: book.encKeyB64,
+      _colEncNonceB64: book.encNonceB64,
       _colSyncedAt: DateTime.now().millisecondsSinceEpoch,
       _colCreatedAt: createdAt ?? DateTime.now().millisecondsSinceEpoch,
     };
@@ -167,6 +178,9 @@ class DatabaseService {
         final thumbnail = maps[i][_colThumbnail];
         final filePath = maps[i][_colFilePath];
         final contentUrlRaw = maps[i][_colContentUrl];
+        final encBookId = maps[i][_colEncBookId];
+        final encKeyB64 = maps[i][_colEncKeyB64];
+        final encNonceB64 = maps[i][_colEncNonceB64];
         
         debugPrint('📖 [DATABASE] Book $i:');
         debugPrint('   - courseId: $courseId');
@@ -176,6 +190,9 @@ class DatabaseService {
         debugPrint('   - filePath (raw): $filePath');
         debugPrint('   - contentUrl (raw): $contentUrlRaw');
         debugPrint('   - final contentUrl: $contentUrl');
+        debugPrint('   - encBookId: $encBookId');
+        debugPrint('   - encKeyB64: ${encKeyB64 != null ? '***' : 'null'}');
+        debugPrint('   - encNonceB64: ${encNonceB64 != null ? '***' : 'null'}');
         
         // Ensure file:// protocol for local files
         if (contentUrl != null && 
@@ -198,6 +215,9 @@ class DatabaseService {
           progress: maps[i][_colProgress] ?? 0,
           thumbnail: thumbnail,
           contentUrl: contentUrl,
+          encBookId: encBookId as String?,
+          encKeyB64: encKeyB64 as String?,
+          encNonceB64: encNonceB64 as String?,
         );
       });
 
@@ -237,6 +257,9 @@ class DatabaseService {
         if (contentUrl == null || contentUrl.isEmpty) {
           contentUrl = maps[i][_colContentUrl];
         }
+        final encBookId = maps[i][_colEncBookId];
+        final encKeyB64 = maps[i][_colEncKeyB64];
+        final encNonceB64 = maps[i][_colEncNonceB64];
         
         final title = maps[i][_colTitle] ?? 'Untitled';
         debugPrint('📖 [DATABASE] Search result $i: "$title"');
@@ -261,6 +284,9 @@ class DatabaseService {
           progress: maps[i][_colProgress] ?? 0,
           thumbnail: maps[i][_colThumbnail],
           contentUrl: contentUrl,
+          encBookId: encBookId as String?,
+          encKeyB64: encKeyB64 as String?,
+          encNonceB64: encNonceB64 as String?,
         );
       });
     } catch (e, stackTrace) {
@@ -287,6 +313,9 @@ class DatabaseService {
     if (contentUrl == null || contentUrl.isEmpty) {
       contentUrl = maps[0][_colContentUrl];
     }
+    final encBookId = maps[0][_colEncBookId];
+    final encKeyB64 = maps[0][_colEncKeyB64];
+    final encNonceB64 = maps[0][_colEncNonceB64];
     
     // Ensure file:// protocol for local files
     if (contentUrl != null && 
@@ -308,7 +337,87 @@ class DatabaseService {
       progress: maps[0][_colProgress] ?? 0,
       thumbnail: maps[0][_colThumbnail],
       contentUrl: contentUrl,
+      encBookId: encBookId as String?,
+      encKeyB64: encKeyB64 as String?,
+      encNonceB64: encNonceB64 as String?,
     );
+  }
+
+  /// Gets book by file path (prefers file_path, falls back to content_url)
+  static Future<Book?> getBookByFilePath(String filePath) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      _tableBooks,
+      where: '$_colFilePath = ?',
+      whereArgs: [filePath],
+      limit: 1,
+    );
+
+    Map<String, dynamic>? row;
+    if (maps.isNotEmpty) {
+      row = maps[0];
+    } else {
+      final fileUrl = filePath.startsWith('file://') ? filePath : 'file://$filePath';
+      final List<Map<String, dynamic>> urlMaps = await db.query(
+        _tableBooks,
+        where: '$_colContentUrl = ?',
+        whereArgs: [fileUrl],
+        limit: 1,
+      );
+      if (urlMaps.isNotEmpty) {
+        row = urlMaps[0];
+      }
+    }
+
+    if (row == null) return null;
+
+    // Prioritize file_path over content_url for downloaded books
+    String? contentUrl = row[_colFilePath];
+    if (contentUrl == null || contentUrl.isEmpty) {
+      contentUrl = row[_colContentUrl];
+    }
+    final encBookId = row[_colEncBookId];
+    final encKeyB64 = row[_colEncKeyB64];
+    final encNonceB64 = row[_colEncNonceB64];
+
+    // Ensure file:// protocol for local files
+    if (contentUrl != null &&
+        contentUrl.isNotEmpty &&
+        !contentUrl.startsWith('http') &&
+        !contentUrl.startsWith('file://') &&
+        !contentUrl.startsWith('assets/')) {
+      if (contentUrl.startsWith('/')) {
+        contentUrl = 'file://$contentUrl';
+      } else {
+        contentUrl = 'file:///$contentUrl';
+      }
+    }
+
+    return Book(
+      title: row[_colTitle],
+      author: row[_colAuthor],
+      progress: row[_colProgress] ?? 0,
+      thumbnail: row[_colThumbnail],
+      contentUrl: contentUrl,
+      encBookId: encBookId as String?,
+      encKeyB64: encKeyB64 as String?,
+      encNonceB64: encNonceB64 as String?,
+    );
+  }
+
+  /// Logs all rows in the books table (for debugging)
+  static Future<void> logAllBooks() async {
+    try {
+      final db = await database;
+      final rows = await db.query(_tableBooks, orderBy: '$_colCreatedAt DESC');
+      debugPrint('📋 [DATABASE] books table: ${rows.length} row(s)');
+      for (int i = 0; i < rows.length; i++) {
+        final row = rows[i];
+        debugPrint('Row $i: ${row.toString()}');
+      }
+    } catch (e) {
+      debugPrint('❌ [DATABASE] Failed to log books table: $e');
+    }
   }
 
   /// Updates book progress

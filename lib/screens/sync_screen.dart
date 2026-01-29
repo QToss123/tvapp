@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as path;
 import 'dart:io';
@@ -8,6 +9,28 @@ import '../models/book.dart';
 import '../routes.dart';
 import '../utils/zip_handler.dart';
 import '../utils/connectivity_helper.dart';
+import '../services/background_sync_service.dart';
+
+/// Per-book sync state: thumbnail, progress %, status.
+class SyncItem {
+  final int courseId;
+  final String title;
+  final String? thumbnail;
+  final String productName;
+  final Map<String, dynamic> course;
+  String status; // pending | downloading | done | error
+  int progress;  // 0-100
+
+  SyncItem({
+    required this.courseId,
+    required this.title,
+    required this.productName,
+    required this.course,
+    this.thumbnail,
+    this.status = 'pending',
+    this.progress = 0,
+  });
+}
 
 class SyncScreen extends StatefulWidget {
   const SyncScreen({super.key});
@@ -19,10 +42,14 @@ class SyncScreen extends StatefulWidget {
 class _SyncScreenState extends State<SyncScreen> {
   bool _isLoading = false;
   String _statusMessage = 'Preparing to sync...';
-  int _progress = 0;
   int _totalBooks = 0;
   int _downloadedBooks = 0;
   bool _syncComplete = false;
+  List<SyncItem> _syncItems = [];
+
+  bool _fetchDone = false;
+  String? _storageLocationForSync;
+  List<Map<String, dynamic>> _allCoursesForSync = [];
 
   @override
   void initState() {
@@ -41,10 +68,34 @@ class _SyncScreenState extends State<SyncScreen> {
     });
 
     if (syncType == 'online') {
-      await _syncOnline();
+      await _fetchAndPrepare();
     } else {
       await _syncOffline(storageLocation);
     }
+  }
+
+  Future<void> _runDownloadsNow() async {
+    if (_storageLocationForSync == null) return;
+    setState(() {
+      _isLoading = true;
+      _statusMessage = 'Downloading ${_syncItems.length} book(s)...';
+    });
+    await DatabaseService.logAllBooks();
+    final futures = <Future<void>>[];
+    for (int i = 0; i < _syncItems.length; i++) {
+      futures.add(_downloadOneCourse(i, _storageLocationForSync!));
+    }
+    await Future.wait(futures);
+    await DatabaseService.logAllBooks();
+    final done = _syncItems.where((s) => s.status == 'done').length;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('syncCompleted', true);
+    setState(() {
+      _isLoading = false;
+      _downloadedBooks = done;
+      _statusMessage = 'Sync complete! Downloaded $done/${_syncItems.length} books.';
+      _syncComplete = true;
+    });
   }
 
   Future<void> _syncOnline() async {
@@ -166,169 +217,117 @@ class _SyncScreenState extends State<SyncScreen> {
 
       debugPrint('✅ Saved $_totalBooks courses to database');
 
-      setState(() {
-        _statusMessage = 'Downloading $_totalBooks book(s)...';
-        _downloadedBooks = 0;
-        _progress = 0;
-      });
-
-      // Download each course one by one
-      for (int i = 0; i < allCourses.length; i++) {
-        final course = allCourses[i];
-        // IMPORTANT: Use same courseId logic as initial save to ensure database update works
+      // Build sync items for UI (thumbnail, progress %, status)
+      final items = <SyncItem>[];
+      for (final course in allCourses) {
         final courseId = course['id'] as int? ?? 0;
         final title = course['title']?.toString() ?? 'Untitled';
         final productName = course['product_name']?.toString() ?? 'Unknown Product';
-        
-        debugPrint('📥 Downloading course: courseId=$courseId, title="$title"');
-
-        setState(() {
-          _statusMessage = 'Downloading: $title ($_downloadedBooks/$_totalBooks)';
-        });
-
-        try {
-          // Download the course using the download API which returns download_url
-          final downloadResult = await ApiService.downloadCourse(
-            courseId,
-            targetDirectory: storageLocation, // Download to external storage
-            onProgress: (progress) {
-              setState(() {
-                _progress = progress;
-              });
-            },
-          );
-
-          if (downloadResult['success'] == true) {
-            final filePath = downloadResult['filePath'] as String;
-            String? finalPath = filePath;
-
-            // If it's a ZIP file, extract it to the same external storage location
-            if (filePath.toLowerCase().endsWith('.zip')) {
-              setState(() {
-                _statusMessage = 'Extracting: $title';
-              });
-
-              // Extract ZIP file - ZipHandler will extract to temp directory
-              // We need to move extracted files to external storage
-              final extracted = await ZipHandler.processBookFile(filePath);
-              
-              if (extracted.wasExtracted) {
-                // Determine if extracted.path is a file or directory
-                final extractedFile = File(extracted.path);
-                final extractedDir = Directory(extracted.path);
-                
-                String extractedDirectoryPath;
-                String? indexHtmlPath;
-                
-                // Check if extracted.path points to a file (index.html) or directory
-                if (await extractedFile.exists()) {
-                  // It's a file (index.html), use its parent directory
-                  extractedDirectoryPath = extractedFile.parent.path;
-                  indexHtmlPath = extracted.path;
-                  debugPrint('Extracted path is a file, using parent directory: $extractedDirectoryPath');
-                } else if (await extractedDir.exists()) {
-                  // It's a directory
-                  extractedDirectoryPath = extracted.path;
-                  debugPrint('Extracted path is a directory: $extractedDirectoryPath');
-                } else {
-                  throw Exception('Extracted path does not exist: ${extracted.path}');
-                }
-                
-                final booksDir = path.join(storageLocation, 'books');
-                final bookFolderName = 'course_${courseId}_${DateTime.now().millisecondsSinceEpoch}';
-                final targetBookDir = path.join(booksDir, bookFolderName);
-                
-                // Create books directory if it doesn't exist
-                final booksDirectory = Directory(booksDir);
-                if (!await booksDirectory.exists()) {
-                  await booksDirectory.create(recursive: true);
-                }
-                
-                // Copy extracted files to external storage
-                final sourceDir = Directory(extractedDirectoryPath);
-                if (sourceDir.path != targetBookDir) {
-                  final targetDir = Directory(targetBookDir);
-                  if (await targetDir.exists()) {
-                    await targetDir.delete(recursive: true);
-                  }
-                  await targetDir.create(recursive: true);
-                  
-                  // Copy all files from extracted directory
-                  await for (final entity in sourceDir.list(recursive: true)) {
-                    final relativePath = path.relative(entity.path, from: extractedDirectoryPath);
-                    final targetPath = path.join(targetBookDir, relativePath);
-                    
-                    if (entity is File) {
-                      final targetFile = File(targetPath);
-                      await targetFile.parent.create(recursive: true);
-                      await entity.copy(targetPath);
-                    }
-                  }
-                  
-                  // Find index.html in the new location
-                  final indexHtml = await ZipHandler.findIndexHtml(targetBookDir);
-                  if (indexHtml != null) {
-                    finalPath = indexHtml;
-                  } else {
-                    finalPath = targetBookDir;
-                  }
-                } else {
-                  // Already in target location, use the index.html path if we have it
-                  finalPath = indexHtmlPath ?? targetBookDir;
-                }
-              } else {
-                finalPath = filePath;
-              }
-            }
-
-            // Create book object with final file path
-            final book = Book(
-              title: title,
-              author: productName, // Use productName from course data
-              progress: 0,
-              thumbnail: course['thumbnail']?.toString() ?? course['product_thumbnail']?.toString(),
-              contentUrl: finalPath != null && finalPath.startsWith('/')
-                  ? 'file://$finalPath'
-                  : finalPath != null && finalPath.startsWith('file://')
-                      ? finalPath
-                      : 'file:///$finalPath',
-            );
-
-            // Update database with file path after successful download
-            debugPrint('💾 Saving book to database: courseId=$courseId, title="$title", finalPath=$finalPath');
-            final dbResult = await DatabaseService.insertBook(
-              book,
-              courseId: courseId,
-              filePath: finalPath,
-            );
-            debugPrint('✅ Database save result: $dbResult');
-
-            _downloadedBooks++;
-            setState(() {
-              _progress = 0;
-            });
-          }
-        } catch (e) {
-          debugPrint('Error downloading book $title: $e');
-          // Continue with next book
-        }
+        final thumb = course['thumbnail']?.toString() ?? course['product_thumbnail']?.toString();
+        items.add(SyncItem(
+          courseId: courseId,
+          title: title,
+          productName: productName,
+          course: course as Map<String, dynamic>,
+          thumbnail: thumb,
+          status: 'pending',
+          progress: 0,
+        ));
       }
 
+      _storageLocationForSync = storageLocation;
+      _allCoursesForSync = List<Map<String, dynamic>>.from(allCourses);
       setState(() {
-        _isLoading = false;
-        _statusMessage = 'Sync complete! Downloaded $_downloadedBooks/$_totalBooks books.';
-        _syncComplete = true;
+        _statusMessage = 'Downloading $_totalBooks book(s)...';
+        _downloadedBooks = 0;
+        _syncItems = items;
+        _fetchDone = true;
+        _isLoading = true;
       });
 
-      // Mark sync as completed in preferences
-      await prefs.setBool('syncCompleted', true);
-
-      // Don't auto-navigate - wait for user to click "Go to Bookshelf"
+      // Auto-start downloads: list API → save to DB → download via download API
+      debugPrint('📥 Starting downloads for ${items.length} book(s)...');
+      await _runDownloadsNow();
     } catch (e) {
       setState(() {
         _isLoading = false;
         _statusMessage = 'Error during sync: $e';
       });
+    }
+  }
+
+  Future<void> _fetchAndPrepare() async {
+    await _syncOnline();
+  }
+
+  Future<void> _downloadOneCourse(int index, String storageLocation) async {
+    if (index < 0 || index >= _syncItems.length) return;
+    final item = _syncItems[index];
+    final courseId = item.courseId;
+    final title = item.title;
+    final productName = item.productName;
+    final course = item.course;
+
+    void update({String? status, int? progress}) {
+      if (!mounted) return;
+      setState(() {
+        if (status != null) item.status = status;
+        if (progress != null) item.progress = progress;
+      });
+    }
+
+    try {
+      update(status: 'downloading', progress: 0);
+      debugPrint('📥 Downloading course: courseId=$courseId, title="$title"');
+
+      final downloadResult = await ApiService.downloadCourse(
+        courseId,
+        targetDirectory: storageLocation,
+        onProgress: (p) => update(progress: p),
+      );
+
+      if (downloadResult['success'] != true) {
+        update(status: 'error');
+        return;
+      }
+
+      final filePath = downloadResult['filePath'] as String;
+      // Save ZIP path only; extraction happens when user opens the book
+      final finalPath = filePath;
+      final encBookId = downloadResult['encBookId'] as String?;
+      final encKeyB64 = downloadResult['encKeyB64'] as String?;
+      final encNonceB64 = downloadResult['encNonceB64'] as String?;
+      debugPrint('🔐 [SYNC] enc keys from API: bookId=$encBookId '
+          'keyEncB64=${encKeyB64 != null ? '***' : 'null'} '
+          'keyNonceB64=${encNonceB64 != null ? '***' : 'null'}');
+
+      final thumb = course['thumbnail']?.toString() ?? course['product_thumbnail']?.toString();
+      final book = Book(
+        title: title,
+        author: productName,
+        progress: 0,
+        thumbnail: thumb,
+        contentUrl: finalPath != null && finalPath.startsWith('/')
+            ? 'file://$finalPath'
+            : finalPath != null && finalPath.startsWith('file://')
+                ? finalPath
+                : 'file:///$finalPath',
+        encBookId: encBookId,
+        encKeyB64: encKeyB64,
+        encNonceB64: encNonceB64,
+      );
+
+      await DatabaseService.insertBook(book, courseId: courseId, filePath: finalPath);
+      update(status: 'done', progress: 100);
+      if (mounted) {
+        setState(() {
+          _downloadedBooks = _syncItems.where((s) => s.status == 'done').length;
+        });
+      }
+      debugPrint('✅ Downloaded: $title');
+    } catch (e) {
+      debugPrint('Error downloading book $title: $e');
+      update(status: 'error');
     }
   }
 
@@ -465,20 +464,8 @@ class _SyncScreenState extends State<SyncScreen> {
 
           // If book found, save to database
           if (bookFound && bookPath != null) {
-            String? finalPath = bookPath;
-            
-            // If it's a ZIP, extract it
-            if (bookPath.toLowerCase().endsWith('.zip')) {
-              final extracted = await ZipHandler.processBookFile(bookPath);
-              if (extracted.wasExtracted) {
-                final indexHtml = await ZipHandler.findIndexHtml(extracted.path);
-                if (indexHtml != null) {
-                  finalPath = indexHtml;
-                } else {
-                  finalPath = extracted.path;
-                }
-              }
-            }
+            // Store path as-is (ZIP or folder); extraction happens when user opens book
+            final finalPath = bookPath;
 
             // Create book object
             final book = Book(
@@ -538,70 +525,229 @@ class _SyncScreenState extends State<SyncScreen> {
         title: const Text('Syncing Books'),
         automaticallyImplyLeading: false,
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (_isLoading) ...[
-                const CircularProgressIndicator(),
-                const SizedBox(height: 24),
-              ] else if (_syncComplete) ...[
-                Icon(
-                  Icons.check_circle,
-                  size: 64,
-                  color: Colors.green,
-                ),
-                const SizedBox(height: 24),
-              ],
-              Text(
-                _statusMessage,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
-                ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              _statusMessage,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
               ),
-              if (_isLoading && _totalBooks > 0) ...[
-                const SizedBox(height: 32),
-                LinearProgressIndicator(
-                  value: _downloadedBooks > 0 
-                      ? (_downloadedBooks / _totalBooks).clamp(0.0, 1.0)
-                      : null,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Progress: $_downloadedBooks / $_totalBooks',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-              ],
-              if (_syncComplete && !_isLoading) ...[
-                const SizedBox(height: 32),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    debugPrint('🔄 [SYNC] User clicked "Go to Bookshelf" button');
-                    debugPrint('🔄 [SYNC] Navigating to home screen using pushReplacementNamed...');
-                    Navigator.pushReplacementNamed(context, AppRoutes.home);
-                    debugPrint('🔄 [SYNC] Navigation completed - HomeScreen should initialize now');
-                  },
-                  icon: const Icon(Icons.library_books),
-                  label: const Text('Go to Bookshelf'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 16,
+            ),
+            if (_isLoading && (_totalBooks > 0 || _syncItems.isNotEmpty)) ...[
+              const SizedBox(height: 8),
+              LinearProgressIndicator(
+                value: () {
+                  final total = _totalBooks > 0 ? _totalBooks : _syncItems.length;
+                  if (total <= 0) return null;
+                  return (_downloadedBooks / total).clamp(0.0, 1.0);
+                }(),
+              ),
+              Text(
+                '$_downloadedBooks / ${_totalBooks > 0 ? _totalBooks : _syncItems.length} complete',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+            ],
+            if (_fetchDone &&
+                _syncItems.isNotEmpty &&
+                !_syncComplete &&
+                !_isLoading) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _runDownloadsNow,
+                      icon: const Icon(Icons.download),
+                      label: const Text('Download all'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                  if (Platform.isAndroid) ...[
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          await enqueueBackgroundSync(_allCoursesForSync);
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Syncing in background. You can close the app.',
+                              ),
+                              duration: Duration(seconds: 4),
+                            ),
+                          );
+                          Navigator.pushReplacementNamed(
+                              context, AppRoutes.home);
+                        },
+                        icon: const Icon(Icons.cloud_download),
+                        label: const Text('Sync in background'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ],
-          ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: _syncItems.isEmpty && !_syncComplete
+                  ? Center(
+                      child: _isLoading
+                          ? const CircularProgressIndicator()
+                          : const SizedBox.shrink(),
+                    )
+                  : _syncItems.isEmpty && _syncComplete
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.check_circle,
+                                size: 64,
+                                color: Colors.green,
+                              ),
+                              const SizedBox(height: 24),
+                              ElevatedButton.icon(
+                                onPressed: () {
+                                  Navigator.pushReplacementNamed(
+                                      context, AppRoutes.home);
+                                },
+                                icon: const Icon(Icons.library_books),
+                                label: const Text('Go to Bookshelf'),
+                                style: ElevatedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 32,
+                                    vertical: 16,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          itemCount: _syncItems.length,
+                          itemBuilder: (context, i) {
+                            final item = _syncItems[i];
+                            return _SyncItemTile(item: item);
+                          },
+                        ),
+            ),
+            if (_syncComplete && _syncItems.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pushReplacementNamed(context, AppRoutes.home);
+                },
+                icon: const Icon(Icons.library_books),
+                label: const Text('Go to Bookshelf'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 16,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
+    );
+  }
+}
+
+class _SyncItemTile extends StatelessWidget {
+  final SyncItem item;
+
+  const _SyncItemTile({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDone = item.status == 'done';
+    final isError = item.status == 'error';
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: item.thumbnail != null && item.thumbnail!.isNotEmpty
+                  ? Image.network(
+                      item.thumbnail!,
+                      width: 56,
+                      height: 56,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _placeholder(),
+                    )
+                  : _placeholder(),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  LinearProgressIndicator(
+                    value: isDone || isError
+                        ? (isDone ? 1.0 : 0.0)
+                        : (item.progress / 100).clamp(0.0, 1.0),
+                    backgroundColor: Colors.grey.shade200,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      isError ? Colors.red : Colors.green,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    isDone
+                        ? 'Done'
+                        : isError
+                            ? 'Error'
+                            : '${item.progress}%',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isError ? Colors.red : Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isDone)
+              const Icon(Icons.check_circle, color: Colors.green, size: 24),
+            if (isError)
+              const Icon(Icons.error, color: Colors.red, size: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _placeholder() {
+    return Container(
+      width: 56,
+      height: 56,
+      color: Colors.grey.shade300,
+      child: Icon(Icons.book, color: Colors.grey.shade600),
     );
   }
 }

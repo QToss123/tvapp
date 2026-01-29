@@ -217,6 +217,8 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
 
   String _query = '';
+  final FocusNode _searchFocusNode = FocusNode();
+  bool _searchEnabled = false;
 
   @override
   void initState() {
@@ -235,6 +237,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     debugPrint('🗑️ [HOME] dispose() called - HomeScreen widget destroyed');
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -299,7 +302,8 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         debugPrint('✅ [HOME] Books loaded successfully:');
         for (int i = 0; i < books.length; i++) {
-          debugPrint('   $i. "${books[i].title}" by ${books[i].author}');
+          final hasUrl = books[i].contentUrl != null && books[i].contentUrl!.isNotEmpty;
+          debugPrint('   $i. "${books[i].title}" by ${books[i].author} contentUrl: ${hasUrl ? "yes" : "NO"}');
         }
       }
       
@@ -608,11 +612,13 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // Show books if license is activated
+    // Show books if license is activated. Only show books with contentUrl
+    // (file_path) so we never open reader without a loadable source.
     final filtered = _books
         .where((b) =>
-            b.title.toLowerCase().contains(_query.toLowerCase()) ||
-            b.author.toLowerCase().contains(_query.toLowerCase()))
+            (b.contentUrl != null && b.contentUrl!.isNotEmpty) &&
+            (b.title.toLowerCase().contains(_query.toLowerCase()) ||
+                b.author.toLowerCase().contains(_query.toLowerCase())))
         .toList();
 
     return Scaffold(
@@ -639,40 +645,70 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.all(14),
         child: Column(
           children: [
-            TextField(
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search),
-                hintText: 'Search books or authors...',
-                border: OutlineInputBorder(),
-              ),
-              onChanged: (v) async {
-                setState(() => _query = v);
-                if (v.isNotEmpty) {
-                  // Search in database
-                  debugPrint('🔍 [HOME] Searching for: "$v"');
-                  try {
-                    final filtered = await DatabaseService.searchBooks(v);
-                    debugPrint('🔍 [HOME] Search returned ${filtered.length} results');
-                    setState(() {
-                      _books = filtered;
-                    });
-                  } catch (e) {
-                    debugPrint('❌ [HOME] Search error: $e');
-                    // Keep current books on error
-                  }
-                } else {
-                  // Reload all books
-                  debugPrint('🔍 [HOME] Search cleared, reloading all books');
-                  _loadBooks();
-                }
-              },
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    enabled: _searchEnabled,
+                    focusNode: _searchFocusNode,
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.search),
+                      hintText: _searchEnabled
+                          ? 'Search books or authors...'
+                          : 'Press search to type...',
+                      border: const OutlineInputBorder(),
+                    ),
+                    onChanged: (v) async {
+                      setState(() => _query = v);
+                      if (v.isNotEmpty) {
+                        // Search in database
+                        debugPrint('🔍 [HOME] Searching for: "$v"');
+                        try {
+                          final filtered = await DatabaseService.searchBooks(v);
+                          debugPrint('🔍 [HOME] Search returned ${filtered.length} results');
+                          setState(() {
+                            _books = filtered;
+                          });
+                        } catch (e) {
+                          debugPrint('❌ [HOME] Search error: $e');
+                          // Keep current books on error
+                        }
+                      } else {
+                        // Reload all books
+                        debugPrint('🔍 [HOME] Search cleared, reloading all books');
+                        _loadBooks();
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: _searchEnabled ? 'Disable search' : 'Enable search',
+                  icon: Icon(_searchEnabled ? Icons.close : Icons.search),
+                  onPressed: () {
+                    setState(() => _searchEnabled = !_searchEnabled);
+                    if (_searchEnabled) {
+                      _searchFocusNode.requestFocus();
+                    } else {
+                      _searchFocusNode.unfocus();
+                    }
+                  },
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             Expanded(
               child: _isLoadingBooks
                   ? const Center(child: CircularProgressIndicator())
-                  : _books.isEmpty
-                      ? const Center(child: Text('No books found.'))
+                  : filtered.isEmpty
+                      ? Center(
+                          child: Text(
+                            _books.isEmpty
+                                ? 'No books found.'
+                                : 'No books with downloaded content.\nComplete sync to download.',
+                            textAlign: TextAlign.center,
+                          ),
+                        )
                       : GridView.builder(
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 10,
