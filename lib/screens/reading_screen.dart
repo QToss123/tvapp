@@ -888,6 +888,10 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // On Windows (and desktop), WebView platform view draws on top of Flutter
+    // overlays. Use AppBar so the back button is in a dedicated area above the WebView.
+    final useAppBarForBack = Platform.isWindows;
+
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, result) {
@@ -895,116 +899,135 @@ class _ReadingScreenState extends State<ReadingScreen> {
         Navigator.maybePop(context);
       },
       child: Scaffold(
-      body: Stack(
-        children: [
-          if (_error != null)
-            Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.error_outline,
-                    size: 64,
-                    color: Colors.red,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Error loading content',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _error ?? 'Unknown error',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      if (widget.book.contentUrl != null &&
-                          widget.book.contentUrl!.isNotEmpty) {
-                        setState(() => _error = null);
-                        _controller.reload();
-                      } else {
-                        Navigator.maybePop(context);
-                      }
-                    },
-                    icon: Icon(
-                      widget.book.contentUrl != null &&
-                              widget.book.contentUrl!.isNotEmpty
-                          ? Icons.refresh
-                          : Icons.arrow_back,
-                    ),
-                    label: Text(
-                      widget.book.contentUrl != null &&
-                              widget.book.contentUrl!.isNotEmpty
-                          ? 'Retry'
-                          : 'Go back',
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else
-            _useTvCursor
-                ? Shortcuts(
-                    shortcuts: <LogicalKeySet, Intent>{
-                      LogicalKeySet(LogicalKeyboardKey.arrowUp): const DirectionIntent('up'),
-                      LogicalKeySet(LogicalKeyboardKey.arrowDown): const DirectionIntent('down'),
-                      LogicalKeySet(LogicalKeyboardKey.arrowLeft): const DirectionIntent('left'),
-                      LogicalKeySet(LogicalKeyboardKey.arrowRight): const DirectionIntent('right'),
-                      LogicalKeySet(LogicalKeyboardKey.select): const DirectionIntent('enter'),
-                      LogicalKeySet(LogicalKeyboardKey.enter): const DirectionIntent('enter'),
-                    },
-                    child: Actions(
-                      actions: <Type, Action<Intent>>{
-                        DirectionIntent: CallbackAction<DirectionIntent>(
-                          onInvoke: (intent) {
-                            _sendKeyToWeb(intent.dir);
-                            return null;
-                          },
-                        ),
-                      },
-                      child: Focus(
-                        focusNode: _webViewFocusNode,
-                        autofocus: true,
-                        skipTraversal: false,
-                        child: WebViewWidget(controller: _controller),
-                      ),
-                    ),
-                  )
-                : WebViewWidget(controller: _controller),
-          if (_isLoading && _error == null)
-            Container(
-              color: Colors.white,
-              child: const Center(
+        appBar: useAppBarForBack
+            ? AppBar(
+                backgroundColor: Colors.black87,
+                elevation: 4,
+                leading: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  tooltip: 'Back',
+                  onPressed: () => Navigator.maybePop(context),
+                ),
+              )
+            : null,
+        body: Stack(
+          children: [
+            if (_error != null)
+              Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 16),
-                    Text('Loading book content...'),
+                    const Icon(
+                      Icons.error_outline,
+                      size: 64,
+                      color: Colors.red,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Error loading content',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _error ?? 'Unknown error',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        if (widget.book.contentUrl != null &&
+                            widget.book.contentUrl!.isNotEmpty) {
+                          setState(() => _error = null);
+                          _controller.reload();
+                        } else {
+                          Navigator.maybePop(context);
+                        }
+                      },
+                      icon: Icon(
+                        widget.book.contentUrl != null &&
+                                widget.book.contentUrl!.isNotEmpty
+                            ? Icons.refresh
+                            : Icons.arrow_back,
+                      ),
+                      label: Text(
+                        widget.book.contentUrl != null &&
+                                widget.book.contentUrl!.isNotEmpty
+                            ? 'Retry'
+                            : 'Go back',
+                      ),
+                    ),
                   ],
                 ),
-              ),
-            ),
-          Positioned(
-            left: 16,
-            top: MediaQuery.of(context).size.height * 0.45,
-            child: Material(
-              color: Colors.black54,
-              shape: const CircleBorder(),
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back),
+              )
+            else
+              _useTvCursor
+                  ? Shortcuts(
+                      shortcuts: <LogicalKeySet, Intent>{
+                        LogicalKeySet(LogicalKeyboardKey.arrowUp): const DirectionIntent('up'),
+                        LogicalKeySet(LogicalKeyboardKey.arrowDown): const DirectionIntent('down'),
+                        LogicalKeySet(LogicalKeyboardKey.arrowLeft): const DirectionIntent('left'),
+                        LogicalKeySet(LogicalKeyboardKey.arrowRight): const DirectionIntent('right'),
+                        LogicalKeySet(LogicalKeyboardKey.select): const DirectionIntent('enter'),
+                        LogicalKeySet(LogicalKeyboardKey.enter): const DirectionIntent('enter'),
+                      },
+                      child: Actions(
+                        actions: <Type, Action<Intent>>{
+                          DirectionIntent: CallbackAction<DirectionIntent>(
+                            onInvoke: (intent) {
+                              _sendKeyToWeb(intent.dir);
+                              return null;
+                            },
+                          ),
+                        },
+                        child: Focus(
+                          focusNode: _webViewFocusNode,
+                          autofocus: true,
+                          skipTraversal: false,
+                          child: WebViewWidget(controller: _controller),
+                        ),
+                      ),
+                    )
+                  : WebViewWidget(controller: _controller),
+            if (_isLoading && _error == null)
+              Container(
                 color: Colors.white,
-                tooltip: 'Back',
-                onPressed: () => Navigator.maybePop(context),
+                child: const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Loading book content...'),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ),
-        ],
+            if (!useAppBarForBack)
+              Positioned(
+                left: 16,
+                top: MediaQuery.of(context).padding.top + 16,
+                child: Tooltip(
+                  message: 'Back',
+                  child: Material(
+                    elevation: 6,
+                    shadowColor: Colors.black45,
+                    color: Colors.black54,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: () => Navigator.maybePop(context),
+                      child: const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Icon(Icons.arrow_back, color: Colors.white, size: 24),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
-    ),
     );
   }
 }
