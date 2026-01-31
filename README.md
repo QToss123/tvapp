@@ -2,6 +2,13 @@
 
 A new Flutter project.
 
+## Windows installer
+
+To build a Windows installer (`.exe`), see **[BUILD_INSTALLER.md](BUILD_INSTALLER.md)**. Quick steps:
+
+1. Install [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install -e --id JRSoftware.InnoSetup`).
+2. Run `.\scripts\build_installer.ps1` from the project root.
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.

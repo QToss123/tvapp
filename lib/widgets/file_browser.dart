@@ -55,7 +55,53 @@ class _FileBrowserState extends State<FileBrowser> {
   /// Yields control periodically to avoid blocking main thread
   Future<List<StorageLocation>> _getAllStorageLocations() async {
     final locations = <StorageLocation>[];
-    
+
+    // Windows: list all drive letters (C:\, D:\, ...) for folder selection
+    if (Platform.isWindows) {
+      for (final letter in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']) {
+        final drivePath = '$letter:\\';
+        try {
+          final dir = Directory(drivePath);
+          if (await dir.exists()) {
+            locations.add(StorageLocation(
+              path: drivePath,
+              name: 'Drive $letter:',
+              isInternal: letter == 'C',
+              displayPath: drivePath,
+            ));
+          }
+        } catch (_) {}
+      }
+      debugPrint('Storage locations (Windows): ${locations.length} drives');
+      return locations;
+    }
+
+    // Linux: /, /home, /mnt, /media
+    if (Platform.isLinux) {
+      final linuxRoots = ['/', '/home', '/mnt', '/media'];
+      for (final root in linuxRoots) {
+        try {
+          final dir = Directory(root);
+          if (await dir.exists()) {
+            try {
+              await dir.list().first.timeout(const Duration(milliseconds: 500));
+              locations.add(StorageLocation(
+                path: root,
+                name: root == '/' ? 'Root' : path.basename(root),
+                isInternal: root == '/home',
+                displayPath: root,
+              ));
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
+      if (locations.isNotEmpty) {
+        debugPrint('Storage locations (Linux): ${locations.length}');
+        return locations;
+      }
+    }
+
+    // Android: internal storage + USB drives
     // Add internal storage options
     final internalPaths = [
       '/storage/emulated/0',
@@ -223,21 +269,28 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   Future<void> _initializeAndLoad() async {
-    // Request permissions before loading
-    final hasPermission = await PermissionHelper.hasStoragePermissions();
-    if (!hasPermission) {
-      final granted = await PermissionHelper.requestStoragePermissions();
-      if (!granted) {
-        setState(() {
-          _error = 'Storage permission is required to browse folders. Please grant permission in app settings.';
-          _isLoading = false;
-        });
-        return;
+    // Storage permission only on Android; Windows/Linux can browse without it
+    if (!Platform.isWindows && !Platform.isLinux) {
+      final hasPermission = await PermissionHelper.hasStoragePermissions();
+      if (!hasPermission) {
+        final granted = await PermissionHelper.requestStoragePermissions();
+        if (!granted) {
+          setState(() {
+            _error = 'Storage permission is required to browse folders. Please grant permission in app settings.';
+            _isLoading = false;
+          });
+          return;
+        }
       }
     }
-    
+
+    // Treat "Not selected" like null -> show storage locations first
+    var initialPath = widget.initialPath;
+    if (initialPath == 'Not selected' || initialPath == null || initialPath.isEmpty) {
+      initialPath = null;
+    }
+
     // If no initial path specified, show storage locations view first
-    final initialPath = widget.initialPath;
     if (initialPath == null) {
       setState(() {
         _isLoading = true;
@@ -388,12 +441,12 @@ class _FileBrowserState extends State<FileBrowser> {
 
       await _loadDirectory(directory);
     } catch (e) {
-      // Check if it's a permission error
+      // Check if it's a permission error (Android only; desktop skips permission flow)
       final errorMessage = e.toString().toLowerCase();
-      if (errorMessage.contains('permission') || 
-          errorMessage.contains('denied') ||
-          errorMessage.contains('eacces')) {
-        // Request permissions again
+      if (!Platform.isWindows && !Platform.isLinux &&
+          (errorMessage.contains('permission') || 
+           errorMessage.contains('denied') ||
+           errorMessage.contains('eacces'))) {
         final granted = await PermissionHelper.requestStoragePermissions();
         if (!granted) {
           setState(() {
@@ -402,9 +455,10 @@ class _FileBrowserState extends State<FileBrowser> {
           });
           return;
         }
-        // Retry loading the same path
         await _loadPath(targetPath);
-      } else if (errorMessage.contains('pathaccessexception') ||
+        return;
+      }
+      if (errorMessage.contains('pathaccessexception') ||
                  errorMessage.contains('directory listing failed')) {
         // Specific handling for directory listing permission errors
         setState(() {
@@ -426,10 +480,16 @@ class _FileBrowserState extends State<FileBrowser> {
       
       // Add parent directory option (except at root or /storage which might not be accessible)
       final currentPath = directory.path;
-      
-      // Special handling: when in /storage or /mnt, show all mounted devices including USB drives
-      if (currentPath == '/storage' || currentPath == '/mnt' || currentPath == '/mnt/media_rw') {
-        // Don't add parent for root storage directories, but ensure we list all devices
+      final isWindowsDriveRoot = Platform.isWindows &&
+          currentPath.length == 3 &&
+          currentPath[1] == ':' &&
+          currentPath.endsWith('\\') &&
+          currentPath[0].toUpperCase().codeUnitAt(0) >= 0x41 &&
+          currentPath[0].toUpperCase().codeUnitAt(0) <= 0x5A;
+
+      // Don't add parent for root storage dirs or Windows drive roots; use "All Storage" to switch drives
+      if (currentPath == '/storage' || currentPath == '/mnt' || currentPath == '/mnt/media_rw' || isWindowsDriveRoot) {
+        // No parent row
       } else if (currentPath != '/') {
         // Only add parent if we're not at the top level
         final parentPath = path.dirname(currentPath);
