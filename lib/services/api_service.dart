@@ -17,17 +17,11 @@ class ApiService {
   static String courseDownloadEndpoint(int courseId) => '$baseUrl/courses/$courseId/download';
   
   static const String _kDeviceIdPrefsKey = 'device_id';
-  static const String _forcedDeviceId = 'tv_1769437510714_3f65d0e1';
-
   /// Returns a stable device ID (dynamic). Generated once per app install,
   /// stored in SharedPreferences, and reused for license/API calls.
   static Future<String> getDeviceId() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      // Force device ID override when requested
-      await prefs.setString(_kDeviceIdPrefsKey, _forcedDeviceId);
-      debugPrint('📱 Device ID (forced): $_forcedDeviceId');
-      return _forcedDeviceId;
       var id = prefs.getString(_kDeviceIdPrefsKey);
       if (id == null || id.isEmpty) {
         id = 'tv_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(0xFFFFFFFF).toRadixString(16)}';
