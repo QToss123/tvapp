@@ -1,26 +1,36 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../models/book.dart';
 import '../routes.dart';
 
 class BookCard extends StatelessWidget {
   final Book book;
-  const BookCard({super.key, required this.book});
+  final bool isFocused;
+
+  const BookCard({super.key, required this.book, this.isFocused = false});
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () {
-        Navigator.pushNamed(
-          context,
-          AppRoutes.reading,
-          arguments: book,
-        );
-      },
-      borderRadius: BorderRadius.circular(8),
-      child: Card(
-      elevation: 3,
+    return Focus(
+      child: Builder(
+        builder: (context) {
+          final hasFocus = Focus.of(context).hasFocus;
+          return InkWell(
+            onTap: () {
+              Navigator.pushNamed(
+                context,
+                AppRoutes.reading,
+                arguments: book,
+              );
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: Card(
+      elevation: hasFocus || isFocused ? 8 : 3,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
+        side: hasFocus || isFocused
+            ? const BorderSide(color: Colors.blue, width: 3)
+            : BorderSide.none,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -30,19 +40,14 @@ class BookCard extends StatelessWidget {
             children: [
               ClipRRect(
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
-                child: AspectRatio(
+                  child: AspectRatio(
                   aspectRatio: 2 / 3,
                   child: book.thumbnail != null && book.thumbnail!.isNotEmpty
-                      ? Image.network(
-                          book.thumbnail!,
+                      ? CachedNetworkImage(
+                          imageUrl: book.thumbnail!,
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return _buildPlaceholderThumbnail();
-                          },
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) return child;
-                            return _buildPlaceholderThumbnail();
-                          },
+                          placeholder: (_, __) => _buildPlaceholderThumbnail(),
+                          errorWidget: (_, __, ___) => _buildPlaceholderThumbnail(),
                         )
                       : _buildPlaceholderThumbnail(),
                 ),
@@ -120,6 +125,9 @@ class BookCard extends StatelessWidget {
           ),
         ],
       ),
+    ),
+  );
+        },
       ),
     );
   }

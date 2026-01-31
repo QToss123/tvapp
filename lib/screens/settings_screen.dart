@@ -1,5 +1,6 @@
-import 'dart:io' show Platform;
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as path;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
@@ -55,7 +56,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     final tvCursor = prefs.getBool(_kTVCursorEnabled) ?? Platform.isAndroid;
     setState(() {
-      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'TES-CL94-S66-0LWS4TCTDB';
+      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'CLA-CL109-S68-KL80AI27OF';
       _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
       _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';
@@ -124,13 +125,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Navigator.of(context).pop();
         }
         
-        // License validation failed
-        final errorMessage = validateResult['message'] ?? 'License validation failed';
+        // License validation failed - handle specific error cases
+        final errorMessage = (validateResult['message'] ?? 'License validation failed').toString().toLowerCase();
+        String userMessage;
+        if (errorMessage.contains('deleted') || errorMessage.contains('not found') || errorMessage.contains('invalid license')) {
+          userMessage = 'License key not found or has been deleted. Please contact support.';
+        } else if (errorMessage.contains('already used') || errorMessage.contains('already activated') || errorMessage.contains('device limit')) {
+          userMessage = 'This license has already been used. Reset does not allow reusing the same license on this device.';
+        } else {
+          userMessage = validateResult['message'] ?? 'License validation failed';
+        }
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(errorMessage),
+              content: Text(userMessage),
               duration: const Duration(seconds: 4),
               backgroundColor: Colors.red,
             ),
@@ -289,26 +298,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // No need for dialog - settings are visible on the same screen
         }
       } else {
-        // License activation failed, but token is already saved, so API calls should still work
-        final errorMessage = activateResult['message'] ?? 'License activation failed';
-        debugPrint('Activation failed, but token is saved: $errorMessage');
+        // License activation failed - do NOT mark as activated for "already used" errors
+        final errorMessage = (activateResult['message'] ?? 'License activation failed').toString().toLowerCase();
+        final isBlockedError = errorMessage.contains('already used') ||
+            errorMessage.contains('already activated') ||
+            errorMessage.contains('device limit') ||
+            errorMessage.contains('deleted') ||
+            errorMessage.contains('not found');
         
-        // Still mark as activated if we have a valid token
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool(_kLicenseActivated, true);
-        await prefs.setString(_kLicenseNumber, licenseValue);
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Warning: $errorMessage. But license validation token is saved.'),
-              duration: const Duration(seconds: 4),
-              backgroundColor: Colors.orange,
-            ),
-          );
-          setState(() {
-            _isLicenseActivated = true;
-          });
+        if (isBlockedError) {
+          // Block: do NOT activate - used license cannot be reused after reset
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('This license has already been used. Reset does not allow reusing the same license on this device.'),
+                duration: Duration(seconds: 4),
+                backgroundColor: Colors.red,
+              ),
+            );
+            setState(() {
+              _isLicenseActivated = false;
+            });
+          }
+        } else {
+          // Other activation failure - still try to use token if saved
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool(_kLicenseActivated, true);
+          await prefs.setString(_kLicenseNumber, licenseValue);
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Warning: ${activateResult['message'] ?? 'License activation failed'}. But license validation token is saved.'),
+                duration: const Duration(seconds: 4),
+                backgroundColor: Colors.orange,
+              ),
+            );
+            setState(() {
+              _isLicenseActivated = true;
+            });
+          }
         }
       }
     } catch (e) {
@@ -378,39 +407,114 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _reset() async {
-    debugPrint('🔄 Resetting all settings...');
     final prefs = await SharedPreferences.getInstance();
-    
-    // Check if token exists before clearing
-    final tokenBefore = prefs.getString(_kLicenseToken);
-    debugPrint('Token before reset: ${tokenBefore != null ? (tokenBefore.substring(0, 20) + '...') : 'null'}');
-    
-    // Clear SharedPreferences
-    await prefs.remove(_kLicenseNumber);
-    await prefs.remove(_kLicenseActivated);
-    await prefs.remove(_kLicenseExpiryDate);
-    await prefs.remove(_kLicenseToken); // Clear the authorization token
-    await prefs.remove(_kSyncType);
-    await prefs.remove(_kStorageLocation);
-    await prefs.remove(_kSyncCompleted);
-    await prefs.remove(_kTVCursorEnabled);
-    
-    // Clear local database (all books)
+    final storageLocation = prefs.getString(_kStorageLocation);
+    final hasStorage = storageLocation != null &&
+        storageLocation.isNotEmpty &&
+        storageLocation != 'Not selected';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Reset'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This will permanently delete:',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              const Text('• License and activation data'),
+              const Text('• All app settings'),
+              const Text('• Local book database'),
+              if (hasStorage) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '• All downloaded books from:\n$storageLocation',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              const Text(
+                'This action cannot be undone. Are you sure?',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Reset & Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    debugPrint('🔄 Resetting all settings and deleting app data...');
+
+    // 1. Delete books from storage location (courses and books folders)
+    if (hasStorage) {
+      try {
+        final coursesDir = Directory(path.join(storageLocation, 'courses'));
+        if (await coursesDir.exists()) {
+          await coursesDir.delete(recursive: true);
+          debugPrint('✅ Deleted courses folder: ${coursesDir.path}');
+        }
+        final booksDir = Directory(path.join(storageLocation, 'books'));
+        if (await booksDir.exists()) {
+          await booksDir.delete(recursive: true);
+          debugPrint('✅ Deleted books folder: ${booksDir.path}');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Error deleting books from storage: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not delete books from storage: $e'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+    }
+
+    // 2. Clear local database
     try {
       final deletedCount = await DatabaseService.clearAllBooks();
       debugPrint('✅ Cleared $deletedCount books from local database');
     } catch (e) {
       debugPrint('❌ Error clearing database: $e');
     }
-    
-    // Verify token was cleared
-    final tokenAfter = prefs.getString(_kLicenseToken);
-    if (tokenAfter == null) {
-      debugPrint('✅ Token successfully cleared from storage');
-    } else {
-      debugPrint('❌ WARNING: Token still exists after reset!');
-    }
-    
+
+    // 3. Clear SharedPreferences (app data)
+    await prefs.remove(_kLicenseNumber);
+    await prefs.remove(_kLicenseActivated);
+    await prefs.remove(_kLicenseExpiryDate);
+    await prefs.remove(_kLicenseToken);
+    await prefs.remove(_kSyncType);
+    await prefs.remove(_kStorageLocation);
+    await prefs.remove(_kSyncCompleted);
+    await prefs.remove(_kTVCursorEnabled);
+
+    if (!mounted) return;
     setState(() {
       _licenseController.text = '';
       _isLicenseActivated = false;
@@ -418,14 +522,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _storageLocation = 'Not selected';
       _tvCursorEnabled = Platform.isAndroid;
     });
-    
-    debugPrint('✅ All settings and local database reset to default');
-    
+
+    debugPrint('✅ Reset complete: app data and books deleted');
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Settings and local database reset to default (including authorization token)'),
-          duration: Duration(seconds: 2),
+        SnackBar(
+          content: Text(
+            hasStorage
+                ? 'Reset complete. App data and downloaded books have been deleted.'
+                : 'Reset complete. App data has been deleted.',
+          ),
+          duration: const Duration(seconds: 3),
+          backgroundColor: Colors.green,
         ),
       );
     }

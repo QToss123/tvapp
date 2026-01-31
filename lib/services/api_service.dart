@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
@@ -7,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:tv_app_books/models/book_download_response.dart';
+import 'package:tv_app_books/utils/device_id_helper.dart';
 
 /// API Service for handling license validation and other API calls
 class ApiService {
@@ -17,14 +17,14 @@ class ApiService {
   static String courseDownloadEndpoint(int courseId) => '$baseUrl/courses/$courseId/download';
   
   static const String _kDeviceIdPrefsKey = 'device_id';
-  /// Returns a stable device ID (dynamic). Generated once per app install,
-  /// stored in SharedPreferences, and reused for license/API calls.
+  /// Returns a stable device ID from the device. Android: IMEI or androidId.
+  /// Windows/Linux: deviceId/machineId + MAC. Stored in SharedPreferences and reused.
   static Future<String> getDeviceId() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       var id = prefs.getString(_kDeviceIdPrefsKey);
       if (id == null || id.isEmpty) {
-        id = 'tv_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(0xFFFFFFFF).toRadixString(16)}';
+        id = await DeviceIdHelper.getPlatformDeviceId();
         await prefs.setString(_kDeviceIdPrefsKey, id);
         debugPrint('📱 Device ID (generated): $id');
       } else {
@@ -113,13 +113,20 @@ class ApiService {
           'message': responseData['message'] ?? 'License validated successfully',
         };
       } else {
-        // Handle error responses
+        // Handle error responses - graceful messages for license deleted/not found
         try {
           final errorData = jsonDecode(response.body);
+          var msg = errorData['message'] ?? errorData['error'] ?? 'License validation failed';
+          if (response.statusCode == 401 || response.statusCode == 404) {
+            final lower = msg.toString().toLowerCase();
+            if (lower.contains('deleted') || lower.contains('not found') || lower.contains('invalid')) {
+              msg = 'License key not found or has been deleted. Please contact support.';
+            }
+          }
           return {
             'success': false,
             'valid': false,
-            'message': errorData['message'] ?? 'License validation failed',
+            'message': msg,
           };
         } catch (e) {
           return {
@@ -256,7 +263,7 @@ class ApiService {
         debugPrint('❌ ERROR: No authorization token found');
         return {
           'success': false,
-          'message': 'No authorization token found. Please activate license first.',
+          'message': 'License key not found or has been deleted. Please activate license in Settings.',
           'products': <Map<String, dynamic>>[],
         };
       }
@@ -266,7 +273,7 @@ class ApiService {
         debugPrint('❌ ERROR: No license value found');
         return {
           'success': false,
-          'message': 'No license found. Please activate license in Settings first.',
+          'message': 'License key not found or has been deleted. Please activate license in Settings.',
           'products': <Map<String, dynamic>>[],
         };
       }
@@ -359,12 +366,19 @@ class ApiService {
           'message': 'Products fetched successfully',
         };
       } else {
-        // Handle error responses
+        // Handle error responses - graceful message for license deleted
         try {
           final errorData = jsonDecode(response.body);
+          var msg = errorData['message'] ?? errorData['error'] ?? 'Failed to fetch products';
+          if (response.statusCode == 401 || response.statusCode == 404) {
+            final lower = msg.toString().toLowerCase();
+            if (lower.contains('deleted') || lower.contains('not found') || lower.contains('invalid license')) {
+              msg = 'License key not found or has been deleted. Please contact support.';
+            }
+          }
           return {
             'success': false,
-            'message': errorData['message'] ?? errorData['error'] ?? 'Failed to fetch products',
+            'message': msg,
             'products': <Map<String, dynamic>>[],
           };
         } catch (e) {

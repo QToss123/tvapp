@@ -89,13 +89,11 @@ class _SplashScreenState extends State<SplashScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: const [
-            Icon(Icons.menu_book_rounded, size: 64),
-            SizedBox(height: 12),
             Text(
               'Burlington',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
             ),
-            SizedBox(height: 6),
+            SizedBox(height: 12),
             Text('Loading...', style: TextStyle(fontSize: 14)),
           ],
         ),

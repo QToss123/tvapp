@@ -20,6 +20,7 @@ class SyncItem {
   final Map<String, dynamic> course;
   String status; // pending | downloading | done | error
   int progress;  // 0-100
+  bool selected; // for select/unselect
 
   SyncItem({
     required this.courseId,
@@ -29,6 +30,7 @@ class SyncItem {
     this.thumbnail,
     this.status = 'pending',
     this.progress = 0,
+    this.selected = true,
   });
 }
 
@@ -76,14 +78,23 @@ class _SyncScreenState extends State<SyncScreen> {
 
   Future<void> _runDownloadsNow() async {
     if (_storageLocationForSync == null) return;
+    final selectedItems = _syncItems.where((s) => s.selected).toList();
+    if (selectedItems.isEmpty) {
+      setState(() {
+        _statusMessage = 'Please select at least one course to download.';
+      });
+      return;
+    }
     setState(() {
       _isLoading = true;
-      _statusMessage = 'Downloading ${_syncItems.length} book(s)...';
+      _statusMessage = 'Downloading ${selectedItems.length} book(s)...';
     });
     await DatabaseService.logAllBooks();
     final futures = <Future<void>>[];
     for (int i = 0; i < _syncItems.length; i++) {
-      futures.add(_downloadOneCourse(i, _storageLocationForSync!));
+      if (_syncItems[i].selected) {
+        futures.add(_downloadOneCourse(i, _storageLocationForSync!));
+      }
     }
     await Future.wait(futures);
     await DatabaseService.logAllBooks();
@@ -232,6 +243,7 @@ class _SyncScreenState extends State<SyncScreen> {
           thumbnail: thumb,
           status: 'pending',
           progress: 0,
+          selected: true,
         ));
       }
 
@@ -263,6 +275,31 @@ class _SyncScreenState extends State<SyncScreen> {
   Future<void> _downloadOneCourse(int index, String storageLocation) async {
     if (index < 0 || index >= _syncItems.length) return;
     final item = _syncItems[index];
+    if (!item.selected) return;
+    // Skip if already downloaded (file exists and in DB)
+    final existingBook = await DatabaseService.getBookByCourseId(item.courseId);
+    if (existingBook != null &&
+        existingBook.contentUrl != null &&
+        existingBook.contentUrl!.isNotEmpty) {
+      final uri = Uri.tryParse(existingBook.contentUrl!);
+      final filePath = uri != null ? uri.path : existingBook.contentUrl!
+          .replaceFirst('file://', '')
+          .replaceFirst('file:///', '');
+      if (filePath.isNotEmpty) {
+        final file = File(filePath);
+        if (await file.exists()) {
+          debugPrint('⏭️ Skipping already downloaded: ${item.title}');
+          if (mounted) {
+            setState(() {
+              item.status = 'done';
+              item.progress = 100;
+              _downloadedBooks = _syncItems.where((s) => s.status == 'done').length;
+            });
+          }
+          return;
+        }
+      }
+    }
     final courseId = item.courseId;
     final title = item.title;
     final productName = item.productName;
@@ -523,7 +560,11 @@ class _SyncScreenState extends State<SyncScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Syncing Books'),
-        automaticallyImplyLeading: false,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back',
+          onPressed: () => Navigator.maybePop(context),
+        ),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -638,22 +679,36 @@ class _SyncScreenState extends State<SyncScreen> {
                           itemCount: _syncItems.length,
                           itemBuilder: (context, i) {
                             final item = _syncItems[i];
-                            return _SyncItemTile(item: item);
+                            return _SyncItemTile(
+                              item: item,
+                              onSelectChanged: (selected) {
+                                setState(() {
+                                  item.selected = selected;
+                                });
+                              },
+                              onRetry: item.status == 'error' && _storageLocationForSync != null
+                                  ? () => _downloadOneCourse(i, _storageLocationForSync!)
+                                  : null,
+                            );
                           },
                         ),
             ),
             if (_syncComplete && _syncItems.isNotEmpty) ...[
               const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pushReplacementNamed(context, AppRoutes.home);
-                },
-                icon: const Icon(Icons.library_books),
-                label: const Text('Go to Bookshelf'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 32,
-                    vertical: 16,
+              Focus(
+                autofocus: true,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pushReplacementNamed(context, AppRoutes.home);
+                  },
+                  icon: const Icon(Icons.library_books),
+                  label: const Text('Go to Bookshelf'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 16,
+                    ),
+                    elevation: 8,
                   ),
                 ),
               ),
@@ -667,8 +722,14 @@ class _SyncScreenState extends State<SyncScreen> {
 
 class _SyncItemTile extends StatelessWidget {
   final SyncItem item;
+  final ValueChanged<bool>? onSelectChanged;
+  final VoidCallback? onRetry;
 
-  const _SyncItemTile({required this.item});
+  const _SyncItemTile({
+    required this.item,
+    this.onSelectChanged,
+    this.onRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -681,6 +742,13 @@ class _SyncItemTile extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            if (onSelectChanged != null && !isDone && !isError)
+              Checkbox(
+                value: item.selected,
+                onChanged: (v) => onSelectChanged!(v ?? true),
+              ),
+            if (onSelectChanged != null && !isDone && !isError)
+              const SizedBox(width: 8),
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: item.thumbnail != null && item.thumbnail!.isNotEmpty
@@ -734,8 +802,17 @@ class _SyncItemTile extends StatelessWidget {
             ),
             if (isDone)
               const Icon(Icons.check_circle, color: Colors.green, size: 24),
-            if (isError)
+            if (isError) ...[
               const Icon(Icons.error, color: Colors.red, size: 24),
+              if (onRetry != null) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Retry',
+                  onPressed: onRetry,
+                ),
+              ],
+            ],
           ],
         ),
       ),

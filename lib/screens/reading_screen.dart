@@ -628,12 +628,12 @@ class _ReadingScreenState extends State<ReadingScreen> {
             );
           }
         } catch (e) {
-          await updateDialog(
-            stepKey: 'Decrypting',
-            message: 'Decryption failed',
-            error: e.toString(),
-          );
-          rethrow;
+        await updateDialog(
+          stepKey: 'Decrypting',
+          message: 'Decryption failed',
+          error: 'Incorrect format. Please ensure the content is in the correct format.',
+        );
+        rethrow;
         }
       }
       
@@ -648,7 +648,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         await updateDialog(
           stepKey: 'Unzipping',
           message: 'Unzip failed',
-          error: 'Invalid ZIP file (possibly corrupted/decryption failed).\n$e',
+          error: 'Incorrect format. Please ensure the content is in the correct format.',
         );
         rethrow;
       }
@@ -718,15 +718,22 @@ class _ReadingScreenState extends State<ReadingScreen> {
       debugPrint('❌ [READING] Failed to load file: $e');
       // Clean up on error
       await _stopLocalServer();
+      final errorStr = e.toString().toLowerCase();
+      final isFormatError = errorStr.contains('format') ||
+          errorStr.contains('invalid zip') ||
+          errorStr.contains('corrupt') ||
+          errorStr.contains('decryption failed');
       setState(() {
         _isLoading = false;
-        _error = 'Failed to load book from external storage\n\n'
-            'File: $fileUrl\n'
-            'Error: $e\n\n'
-            'Make sure:\n'
-            '1. The file exists at the specified path\n'
-            '2. The device has read permissions\n'
-            '3. The path is correct (e.g., file:///storage/XXXX-XXXX/books/book1/index.html or file:///storage/XXXX-XXXX/books/book1.zip)';
+        _error = isFormatError
+            ? 'Incorrect format. Please ensure the content is in the correct format.'
+            : 'Failed to load book from external storage\n\n'
+                'File: $fileUrl\n'
+                'Error: $e\n\n'
+                'Make sure:\n'
+                '1. The file exists at the specified path\n'
+                '2. The device has read permissions\n'
+                '3. The path is correct (e.g., file:///storage/XXXX-XXXX/books/book1/index.html or file:///storage/XXXX-XXXX/books/book1.zip)';
       });
     }
   }
@@ -881,7 +888,13 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        Navigator.maybePop(context);
+      },
+      child: Scaffold(
       body: Stack(
         children: [
           if (_error != null)
@@ -991,6 +1004,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
           ),
         ],
       ),
+    ),
     );
   }
 }

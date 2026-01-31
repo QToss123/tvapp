@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:cryptography/cryptography.dart';
 import 'package:cryptography_flutter/cryptography_flutter.dart';
@@ -43,6 +44,16 @@ void main() async {
     } catch (e) {
       debugPrint('⚠️ [MAIN] WorkManager init failed: $e');
     }
+  }
+  // Full screen mode on launch (Android: immersive; Windows/Linux: edge-to-edge when supported)
+  try {
+    if (Platform.isAndroid) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else if (Platform.isWindows || Platform.isLinux) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+  } catch (e) {
+    debugPrint('⚠️ [MAIN] Full screen mode not supported: $e');
   }
   debugPrint('🚀 [MAIN] Running MyApp...');
   debugPrint('');
