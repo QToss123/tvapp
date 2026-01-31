@@ -591,36 +591,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _pickStorageLocation() async {
     try {
-      // Request storage permissions first
-      final hasPermission = await PermissionHelper.hasStoragePermissions();
-      if (!hasPermission) {
-        final granted = await PermissionHelper.requestStoragePermissions();
-        if (!granted) {
-          if (mounted) {
-            showDialog(
-              context: context,
-              builder: (context) => AlertDialog(
-                title: const Text('Permission Required'),
-                content: const Text(
-                  'Storage permission is required to select a folder. Please grant permission in app settings.',
+      // Storage permission only on Android; Windows/Linux can browse folders without it
+      if (!Platform.isWindows && !Platform.isLinux) {
+        final hasPermission = await PermissionHelper.hasStoragePermissions();
+        if (!hasPermission) {
+          final granted = await PermissionHelper.requestStoragePermissions();
+          if (!granted) {
+            if (mounted) {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Permission Required'),
+                  content: const Text(
+                    'Storage permission is required to select a folder. Please grant permission in app settings.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        await PermissionHelper.openAppSettings();
+                      },
+                      child: const Text('Open Settings'),
+                    ),
+                  ],
                 ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                  ElevatedButton(
-                    onPressed: () async {
-                      Navigator.pop(context);
-                      await PermissionHelper.openAppSettings();
-                    },
-                    child: const Text('Open Settings'),
-                  ),
-                ],
-              ),
-            );
+              );
+            }
+            return;
           }
-          return;
         }
       }
 

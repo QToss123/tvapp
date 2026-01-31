@@ -426,6 +426,23 @@ class _ReadingScreenState extends State<ReadingScreen> {
     }
   }
 
+  /// Converts a file:// URL to a native filesystem path (handles Windows drive letters).
+  static String _fileUrlToPath(String fileUrl) {
+    final uri = Uri.parse(fileUrl);
+    var filePath = uri.path;
+    if (Platform.isWindows &&
+        filePath.length >= 3 &&
+        filePath.startsWith('/') &&
+        filePath[2] == ':' &&
+        RegExp(r'^/[A-Za-z]:').hasMatch(filePath)) {
+      filePath = filePath.substring(1);
+    }
+    if (Platform.isWindows) {
+      filePath = filePath.replaceAll('/', path.separator);
+    }
+    return filePath;
+  }
+
   /// Loads a file from external storage (USB drive, SD card, etc.)
   /// Copies the book folder to internal storage first, then loads from there
   /// This bypasses Android 10+ file:// access restrictions
@@ -536,9 +553,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
         }
       }
       
-      // Parse the file:// URL
-      final uri = Uri.parse(fileUrl);
-      var filePath = uri.path;
+      // Parse file:// URL to native path (Windows: /D:/path -> D:\path)
+      var filePath = _fileUrlToPath(fileUrl);
       var file = File(filePath);
       
       // Check if file exists
