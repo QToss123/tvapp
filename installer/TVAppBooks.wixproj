@@ -1,0 +1,11 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <OutputName>TVAppBooks</OutputName>
+    <WixToolsetVersion>v5</WixToolsetVersion>
+    <DefineConstants>Release=$(ReleaseDir)</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <WixSource Include="Product.wxs" />
+  </ItemGroup>
+</Project>

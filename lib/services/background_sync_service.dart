@@ -47,10 +47,20 @@ Future<void> _runBackgroundSync() async {
       final title = course['title']?.toString() ?? 'Untitled';
       final productName = course['product_name']?.toString() ?? 'Unknown Product';
 
+      // Skip if already downloaded
+      final existingPath = await DatabaseService.getFilePathByCourseId(courseId);
+      if (existingPath != null && existingPath.isNotEmpty) {
+        if (await File(existingPath).exists()) {
+          debugPrint('⏭️ Background sync: skipping already downloaded: $title');
+          continue;
+        }
+      }
+
       final downloadResult = await ApiService.downloadCourse(
         courseId,
         targetDirectory: storageLocation,
         onProgress: null,
+        checkExisting: (encId) => DatabaseService.getFilePathByEncBookId(encId),
       );
 
       if (downloadResult['success'] != true) continue;
@@ -59,6 +69,7 @@ Future<void> _runBackgroundSync() async {
       // Save ZIP path only; extraction happens when user opens the book
       final finalPath = filePath;
       final encBookId = downloadResult['encBookId'] as String?;
+      final encBookPath = downloadResult['encBookPath'] as String?;
       final encKeyB64 = downloadResult['encKeyB64'] as String?;
       final encNonceB64 = downloadResult['encNonceB64'] as String?;
 
@@ -75,6 +86,7 @@ Future<void> _runBackgroundSync() async {
                 ? finalPath
                 : 'file:///$finalPath',
         encBookId: encBookId,
+        encBookPath: encBookPath,
         encKeyB64: encKeyB64,
         encNonceB64: encNonceB64,
       );

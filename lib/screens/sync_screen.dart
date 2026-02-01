@@ -18,9 +18,10 @@ class SyncItem {
   final String? thumbnail;
   final String productName;
   final Map<String, dynamic> course;
-  String status; // pending | downloading | done | error
+  String status; // pending | downloading | done | error | paused
   int progress;  // 0-100
   bool selected; // for select/unselect
+  bool isPaused; // when true, download will abort (for pause support)
 
   SyncItem({
     required this.courseId,
@@ -31,6 +32,7 @@ class SyncItem {
     this.status = 'pending',
     this.progress = 0,
     this.selected = true,
+    this.isPaused = false,
   });
 }
 
@@ -277,27 +279,19 @@ class _SyncScreenState extends State<SyncScreen> {
     final item = _syncItems[index];
     if (!item.selected) return;
     // Skip if already downloaded (file exists and in DB)
-    final existingBook = await DatabaseService.getBookByCourseId(item.courseId);
-    if (existingBook != null &&
-        existingBook.contentUrl != null &&
-        existingBook.contentUrl!.isNotEmpty) {
-      final uri = Uri.tryParse(existingBook.contentUrl!);
-      final filePath = uri != null ? uri.path : existingBook.contentUrl!
-          .replaceFirst('file://', '')
-          .replaceFirst('file:///', '');
-      if (filePath.isNotEmpty) {
-        final file = File(filePath);
-        if (await file.exists()) {
-          debugPrint('⏭️ Skipping already downloaded: ${item.title}');
-          if (mounted) {
-            setState(() {
-              item.status = 'done';
-              item.progress = 100;
-              _downloadedBooks = _syncItems.where((s) => s.status == 'done').length;
-            });
-          }
-          return;
+    final filePath = await DatabaseService.getFilePathByCourseId(item.courseId);
+    if (filePath != null && filePath.isNotEmpty) {
+      final file = File(filePath);
+      if (await file.exists()) {
+        debugPrint('⏭️ Skipping already downloaded: ${item.title}');
+        if (mounted) {
+          setState(() {
+            item.status = 'done';
+            item.progress = 100;
+            _downloadedBooks = _syncItems.where((s) => s.status == 'done').length;
+          });
         }
+        return;
       }
     }
     final courseId = item.courseId;
@@ -314,6 +308,7 @@ class _SyncScreenState extends State<SyncScreen> {
     }
 
     try {
+      item.isPaused = false;
       update(status: 'downloading', progress: 0);
       debugPrint('📥 Downloading course: courseId=$courseId, title="$title"');
 
@@ -321,10 +316,16 @@ class _SyncScreenState extends State<SyncScreen> {
         courseId,
         targetDirectory: storageLocation,
         onProgress: (p) => update(progress: p),
+        isCancelled: () => item.isPaused,
+        checkExisting: (encId) => DatabaseService.getFilePathByEncBookId(encId),
       );
 
       if (downloadResult['success'] != true) {
-        update(status: 'error');
+        if (downloadResult['cancelled'] == true) {
+          update(status: 'paused');
+        } else {
+          update(status: 'error');
+        }
         return;
       }
 
@@ -338,6 +339,7 @@ class _SyncScreenState extends State<SyncScreen> {
           'keyEncB64=${encKeyB64 != null ? '***' : 'null'} '
           'keyNonceB64=${encNonceB64 != null ? '***' : 'null'}');
 
+      final encBookPath = downloadResult['encBookPath'] as String?;
       final thumb = course['thumbnail']?.toString() ?? course['product_thumbnail']?.toString();
       final book = Book(
         title: title,
@@ -350,6 +352,7 @@ class _SyncScreenState extends State<SyncScreen> {
                 ? finalPath
                 : 'file:///$finalPath',
         encBookId: encBookId,
+        encBookPath: encBookPath,
         encKeyB64: encKeyB64,
         encNonceB64: encNonceB64,
       );
@@ -555,15 +558,43 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
+  void _handleBack() {
+    final downloading = _isLoading &&
+        _syncItems.any((s) => s.status == 'downloading' || s.status == 'pending');
+    if (downloading && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Downloads will continue in background.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+    Navigator.maybePop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop &&
+            _isLoading &&
+            _syncItems.any((s) => s.status == 'downloading' || s.status == 'pending')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Downloads will continue in background.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('Syncing Books'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           tooltip: 'Back',
-          onPressed: () => Navigator.maybePop(context),
+          onPressed: _handleBack,
         ),
       ),
       body: Padding(
@@ -675,18 +706,33 @@ class _SyncScreenState extends State<SyncScreen> {
                             ],
                           ),
                         )
-                      : ListView.builder(
+                      : GridView.builder(
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 8,
+                            childAspectRatio: 0.65,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                          ),
+                          padding: const EdgeInsets.only(bottom: 16),
                           itemCount: _syncItems.length,
                           itemBuilder: (context, i) {
                             final item = _syncItems[i];
-                            return _SyncItemTile(
+                            return _SyncItemGridTile(
                               item: item,
                               onSelectChanged: (selected) {
                                 setState(() {
                                   item.selected = selected;
                                 });
                               },
-                              onRetry: item.status == 'error' && _storageLocationForSync != null
+                              onPause: item.status == 'downloading'
+                                  ? () {
+                                      setState(() {
+                                        item.isPaused = true;
+                                      });
+                                    }
+                                  : null,
+                              onResume: (item.status == 'error' || item.status == 'paused') &&
+                                      _storageLocationForSync != null
                                   ? () => _downloadOneCourse(i, _storageLocationForSync!)
                                   : null,
                             );
@@ -716,115 +762,154 @@ class _SyncScreenState extends State<SyncScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 }
 
-class _SyncItemTile extends StatelessWidget {
+class _SyncItemGridTile extends StatelessWidget {
   final SyncItem item;
   final ValueChanged<bool>? onSelectChanged;
-  final VoidCallback? onRetry;
+  final VoidCallback? onPause;
+  final VoidCallback? onResume;
 
-  const _SyncItemTile({
+  const _SyncItemGridTile({
     required this.item,
     this.onSelectChanged,
-    this.onRetry,
+    this.onPause,
+    this.onResume,
   });
 
   @override
   Widget build(BuildContext context) {
     final isDone = item.status == 'done';
     final isError = item.status == 'error';
+    final isPaused = item.status == 'paused';
+    final isDownloading = item.status == 'downloading';
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            if (onSelectChanged != null && !isDone && !isError)
-              Checkbox(
-                value: item.selected,
-                onChanged: (v) => onSelectChanged!(v ?? true),
-              ),
-            if (onSelectChanged != null && !isDone && !isError)
-              const SizedBox(width: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: item.thumbnail != null && item.thumbnail!.isNotEmpty
-                  ? Image.network(
-                      item.thumbnail!,
-                      width: 56,
-                      height: 56,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _placeholder(),
-                    )
-                  : _placeholder(),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Thumbnail
+          Expanded(
+            flex: 3,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ClipRect(
+                  child: item.thumbnail != null && item.thumbnail!.isNotEmpty
+                      ? Image.network(
+                          item.thumbnail!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _placeholder(),
+                        )
+                      : _placeholder(),
+                ),
+                if (onSelectChanged != null && !isDone && !isError)
+                  Positioned(
+                    top: 2,
+                    left: 2,
+                    child: Checkbox(
+                      value: item.selected,
+                      onChanged: (v) => onSelectChanged!(v ?? true),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                if (isDone)
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: Icon(Icons.check_circle, color: Colors.green, size: 18),
+                  ),
+              ],
             ),
-            const SizedBox(width: 12),
-            Expanded(
+          ),
+          // Title and progress
+          Expanded(
+            flex: 2,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     item.title,
                     style: const TextStyle(
                       fontWeight: FontWeight.w600,
-                      fontSize: 14,
+                      fontSize: 10,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
                   LinearProgressIndicator(
-                    value: isDone || isError
-                        ? (isDone ? 1.0 : 0.0)
+                    value: isDone || isError || isPaused
+                        ? (isDone ? 1.0 : (item.progress / 100).clamp(0.0, 1.0))
                         : (item.progress / 100).clamp(0.0, 1.0),
                     backgroundColor: Colors.grey.shade200,
                     valueColor: AlwaysStoppedAnimation<Color>(
-                      isError ? Colors.red : Colors.green,
+                      isError ? Colors.red : isPaused ? Colors.orange : Colors.green,
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    isDone
-                        ? 'Done'
-                        : isError
-                            ? 'Error'
-                            : '${item.progress}%',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isError ? Colors.red : Colors.grey.shade600,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        isDone
+                            ? 'Done'
+                            : isError
+                                ? 'Error'
+                                : isPaused
+                                    ? '${item.progress}%'
+                                    : '${item.progress}%',
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: isError
+                              ? Colors.red
+                              : isPaused
+                                  ? Colors.orange
+                                  : Colors.grey.shade600,
+                        ),
+                      ),
+                      if (isDownloading && onPause != null)
+                        IconButton(
+                          icon: const Icon(Icons.pause_circle),
+                          iconSize: 18,
+                          tooltip: 'Pause',
+                          onPressed: onPause,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                        )
+                      else if ((isError || isPaused) && onResume != null)
+                        IconButton(
+                          icon: Icon(
+                            isPaused ? Icons.play_circle : Icons.refresh,
+                            size: 18,
+                          ),
+                          tooltip: isPaused ? 'Resume' : 'Retry',
+                          onPressed: onResume,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                        ),
+                    ],
                   ),
                 ],
               ),
             ),
-            if (isDone)
-              const Icon(Icons.check_circle, color: Colors.green, size: 24),
-            if (isError) ...[
-              const Icon(Icons.error, color: Colors.red, size: 24),
-              if (onRetry != null) ...[
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  tooltip: 'Retry',
-                  onPressed: onRetry,
-                ),
-              ],
-            ],
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _placeholder() {
     return Container(
-      width: 56,
-      height: 56,
       color: Colors.grey.shade300,
-      child: Icon(Icons.book, color: Colors.grey.shade600),
+      child: Icon(Icons.book, color: Colors.grey.shade600, size: 24),
     );
   }
 }

@@ -950,6 +950,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  if (_isLicenseActivated && _storageLocation != 'Not selected') ...[
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pushNamed(context, AppRoutes.sync);
+                      },
+                      icon: const Icon(Icons.cloud_download),
+                      label: const Text('Go to Sync / Download Books'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   DropdownButtonFormField<String>(
                     value: _syncType,
                     decoration: const InputDecoration(

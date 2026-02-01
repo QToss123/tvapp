@@ -403,10 +403,14 @@ class ApiService {
   /// Returns a map with download result and file path
   /// [onProgress] callback receives progress percentage (0-100)
   /// [targetDirectory] optional target directory for downloads (defaults to app documents)
+  /// [isCancelled] when returns true, download is aborted (for pause support)
+  /// [checkExisting] if provided and returns a path for encBookId, skips download when file exists
   static Future<Map<String, dynamic>> downloadCourse(
     int courseId, {
     Function(int progress)? onProgress,
     String? targetDirectory,
+    bool Function()? isCancelled,
+    Future<String?> Function(String encBookId)? checkExisting,
   }) async {
     try {
       final token = await getStoredToken();
@@ -491,7 +495,28 @@ class ApiService {
 
         debugPrint('Download URL received: ${downloadUrl.substring(0, downloadUrl.length > 50 ? 50 : downloadUrl.length)}...');
         if (keys != null) {
-          debugPrint('🔐 Encrypted book: ${keys.bookId}');
+          debugPrint('🔐 Encrypted book: ${keys.bookId} enc_book_path: ${keys.encBookPath}');
+        }
+
+        // Check if file already exists (by enc_book_id) before downloading
+        if (keys != null && checkExisting != null) {
+          final existingPath = await checkExisting(keys.bookId);
+          if (existingPath != null && existingPath.isNotEmpty) {
+            final existingFile = File(existingPath);
+            if (await existingFile.exists()) {
+              debugPrint('⏭️ Skipping download: file already exists for enc_book_id=${keys.bookId}');
+              return {
+                'success': true,
+                'filePath': existingPath,
+                'message': 'File already exists',
+                'isEncrypted': true,
+                'encBookId': keys.bookId,
+                'encKeyB64': keys.keyEncB64,
+                'encNonceB64': keys.keyNonceB64,
+                'encBookPath': keys.encBookPath,
+              };
+            }
+          }
         }
 
         // Use target directory if provided (external storage), otherwise use app documents
@@ -510,16 +535,21 @@ class ApiService {
           await coursesDirectory.create(recursive: true);
         }
 
-        String extension = '.zip';
-        if (fileKey != null && fileKey.contains('.')) {
-          extension = path.extension(fileKey);
-        } else if (downloadUrl.contains('.zip')) {
-          extension = '.zip';
-        } else if (downloadUrl.contains('.html')) {
-          extension = '.html';
+        // Use enc_book_path filename when available (e.g. book_xxx_encrypted.zip)
+        String fileName;
+        if (keys != null && keys.encBookPath.isNotEmpty) {
+          fileName = path.basename(keys.encBookPath);
+        } else {
+          String extension = '.zip';
+          if (fileKey != null && fileKey.contains('.')) {
+            extension = path.extension(fileKey);
+          } else if (downloadUrl.contains('.zip')) {
+            extension = '.zip';
+          } else if (downloadUrl.contains('.html')) {
+            extension = '.html';
+          }
+          fileName = 'course_$courseId$extension';
         }
-
-        final String fileName = 'course_$courseId$extension';
         final String filePath = path.join(coursesDir, fileName);
         final File file = File(filePath);
 
@@ -536,7 +566,12 @@ class ApiService {
         final contentLength = downloadRequest.contentLength;
         int downloadedBytes = 0;
         final sink = file.openWrite();
+        bool cancelled = false;
         await for (final chunk in downloadRequest.stream) {
+          if (isCancelled?.call() == true) {
+            cancelled = true;
+            break;
+          }
           sink.add(chunk);
           downloadedBytes += chunk.length;
           if (contentLength != null &&
@@ -546,6 +581,15 @@ class ApiService {
           }
         }
         await sink.close();
+        if (cancelled) {
+          if (await file.exists()) await file.delete();
+          return {
+            'success': false,
+            'cancelled': true,
+            'message': 'Download paused',
+            'filePath': null,
+          };
+        }
 
         debugPrint('Course downloaded successfully to: $filePath');
         debugPrint('File size: ${await file.length()} bytes');

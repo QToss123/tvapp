@@ -43,6 +43,16 @@ If you see **`PS C:\...>`** you are in **PowerShell (Windows)**. Paths like `/mn
 
 ## On Windows: use WSL and run these inside Ubuntu
 
+### Build Linux from PowerShell (recommended)
+
+From the project root in **PowerShell**:
+
+```powershell
+.\scripts\build_linux.ps1
+```
+
+This invokes WSL and builds the Linux release + `.deb` installer. Requires WSL with Ubuntu installed. First time: run `run_linux.sh` in WSL once to install Flutter and dependencies.
+
 ### Quick run (one script)
 
 1. **Start Ubuntu (WSL)** — Open **"Ubuntu"** from Start, or run `wsl` in PowerShell.
@@ -85,6 +95,18 @@ If you see **`PS C:\...>`** you are in **PowerShell (Windows)**. Paths like `/mn
 
 ---
 
+## CRLF / line ending errors
+
+If you see `$'\r': command not found` or `command not found "get"`, the shell scripts have Windows line endings (CRLF). Fix in WSL:
+
+```bash
+sed -i 's/\r$//' scripts/build_linux_installer.sh scripts/run_linux.sh
+```
+
+Then run the build again. The `build_linux.ps1` script does this automatically.
+
+---
+
 ## Do not run the WSL path in PowerShell
 
 The path `/mnt/c/Users/meena/Desktop/git/tv_app_books` is for **Linux/WSL only**.
@@ -106,3 +128,25 @@ flutter build linux
 ```
 
 Same dependencies as above if Flutter or GTK are not yet installed.
+
+---
+
+## Create Ubuntu installer (.deb)
+
+To build a `.deb` package for distribution:
+
+1. **In Ubuntu (or WSL)** — ensure Flutter (manual install) and build deps are set up.
+2. **Run the installer script:**
+   ```bash
+   cd /mnt/c/Users/meena/Desktop/git/tv_app_books
+   bash scripts/build_linux_installer.sh
+   ```
+3. **Output** — `build/tv-app-books_1.0.0_amd64.deb` (version from `pubspec.yaml`).
+
+**Install on another Ubuntu machine:**
+```bash
+sudo dpkg -i tv-app-books_1.0.0_amd64.deb
+sudo apt-get install -f   # fix any missing dependencies
+```
+
+**User dependencies** (installed automatically if missing): `libgtk-3-0`, `libwebkit2gtk-4.1-0`, `libblkid1`, `liblzma5`.

@@ -9,7 +9,7 @@ import '../models/book.dart';
 class DatabaseService {
   static Database? _database;
   static const String _databaseName = 'books.db';
-  static const int _databaseVersion = 2;
+  static const int _databaseVersion = 3;
   
   static const String _tableBooks = 'books';
   
@@ -22,6 +22,7 @@ class DatabaseService {
   static const String _colContentUrl = 'content_url';
   static const String _colFilePath = 'file_path';
   static const String _colEncBookId = 'enc_book_id';
+  static const String _colEncBookPath = 'enc_book_path';
   static const String _colEncKeyB64 = 'enc_key_b64';
   static const String _colEncNonceB64 = 'enc_nonce_b64';
   static const String _colCourseId = 'course_id';
@@ -85,6 +86,9 @@ class DatabaseService {
       await db.execute('ALTER TABLE $_tableBooks ADD COLUMN $_colEncKeyB64 TEXT');
       await db.execute('ALTER TABLE $_tableBooks ADD COLUMN $_colEncNonceB64 TEXT');
     }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE $_tableBooks ADD COLUMN $_colEncBookPath TEXT');
+    }
   }
 
   /// Inserts a book into the database
@@ -114,6 +118,7 @@ class DatabaseService {
       _colContentUrl: book.contentUrl,
       _colFilePath: filePath,
       _colEncBookId: book.encBookId,
+      _colEncBookPath: book.encBookPath,
       _colEncKeyB64: book.encKeyB64,
       _colEncNonceB64: book.encNonceB64,
       _colSyncedAt: DateTime.now().millisecondsSinceEpoch,
@@ -216,6 +221,7 @@ class DatabaseService {
           thumbnail: thumbnail,
           contentUrl: contentUrl,
           encBookId: encBookId as String?,
+          encBookPath: maps[i][_colEncBookPath] as String?,
           encKeyB64: encKeyB64 as String?,
           encNonceB64: encNonceB64 as String?,
         );
@@ -285,6 +291,7 @@ class DatabaseService {
           thumbnail: maps[i][_colThumbnail],
           contentUrl: contentUrl,
           encBookId: encBookId as String?,
+          encBookPath: maps[i][_colEncBookPath] as String?,
           encKeyB64: encKeyB64 as String?,
           encNonceB64: encNonceB64 as String?,
         );
@@ -294,6 +301,62 @@ class DatabaseService {
       debugPrint('Stack trace: $stackTrace');
       return [];
     }
+  }
+
+  /// Gets the raw file path for a book by enc_book_id (for "already downloaded" checks).
+  /// Returns path if we have this book and the file exists on disk.
+  static Future<String?> getFilePathByEncBookId(String encBookId) async {
+    final db = await database;
+    final maps = await db.query(
+      _tableBooks,
+      columns: [_colFilePath, _colContentUrl],
+      where: '$_colEncBookId = ?',
+      whereArgs: [encBookId],
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    final filePath = maps[0][_colFilePath] as String?;
+    if (filePath != null && filePath.isNotEmpty) {
+      if (await File(filePath).exists()) return filePath;
+    }
+    final contentUrl = maps[0][_colContentUrl] as String?;
+    if (contentUrl == null || contentUrl.isEmpty) return null;
+    if (contentUrl.startsWith('file://')) {
+      final uri = Uri.parse(contentUrl);
+      var p = uri.path;
+      if (Platform.isWindows && p.length >= 3 && p.startsWith('/') && p[2] == ':') {
+        p = p.substring(1);
+      }
+      final pathStr = Platform.isWindows ? p.replaceAll('/', path.separator) : p;
+      if (await File(pathStr).exists()) return pathStr;
+    }
+    return null;
+  }
+
+  /// Gets the raw file path for a book by course ID (for "already downloaded" checks).
+  static Future<String?> getFilePathByCourseId(int courseId) async {
+    final db = await database;
+    final maps = await db.query(
+      _tableBooks,
+      columns: [_colFilePath, _colContentUrl],
+      where: '$_colCourseId = ?',
+      whereArgs: [courseId],
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    final filePath = maps[0][_colFilePath] as String?;
+    if (filePath != null && filePath.isNotEmpty) return filePath;
+    final contentUrl = maps[0][_colContentUrl] as String?;
+    if (contentUrl == null || contentUrl.isEmpty) return null;
+    if (contentUrl.startsWith('file://')) {
+      final uri = Uri.parse(contentUrl);
+      var p = uri.path;
+      if (Platform.isWindows && p.length >= 3 && p.startsWith('/') && p[2] == ':') {
+        p = p.substring(1);
+      }
+      return Platform.isWindows ? p.replaceAll('/', path.separator) : p;
+    }
+    return contentUrl;
   }
 
   /// Gets book by course ID
@@ -338,6 +401,7 @@ class DatabaseService {
       thumbnail: maps[0][_colThumbnail],
       contentUrl: contentUrl,
       encBookId: encBookId as String?,
+      encBookPath: maps[0][_colEncBookPath] as String?,
       encKeyB64: encKeyB64 as String?,
       encNonceB64: encNonceB64 as String?,
     );
@@ -400,6 +464,7 @@ class DatabaseService {
       thumbnail: row[_colThumbnail],
       contentUrl: contentUrl,
       encBookId: encBookId as String?,
+      encBookPath: row[_colEncBookPath] as String?,
       encKeyB64: encKeyB64 as String?,
       encNonceB64: encNonceB64 as String?,
     );

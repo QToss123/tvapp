@@ -6,6 +6,7 @@ class Book {
   final String? contentUrl; // URL to load book content in webview
   // Encryption metadata (optional)
   final String? encBookId;
+  final String? encBookPath; // e.g. media/encrypted_media/book_xxx_encrypted.zip
   final String? encKeyB64;
   final String? encNonceB64;
 
@@ -16,6 +17,7 @@ class Book {
     this.thumbnail,
     this.contentUrl,
     this.encBookId,
+    this.encBookPath,
     this.encKeyB64,
     this.encNonceB64,
   });
