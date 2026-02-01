@@ -4,6 +4,8 @@ Flutter’s **Linux build runs only on a Linux host**. On Windows, use **WSL (Ub
 
 ---
 
+**Important:** Do **not** install Flutter via `apt` or `snap` when using webview_win_floating—it causes glibc conflicts with webkit2gtk. Use the manual Flutter install (clone from GitHub) instead.
+
 ## How to reach the Ubuntu (WSL) prompt `user@machine:~$`
 
 You need to be in **Ubuntu**, not PowerShell. Use one of these:
@@ -41,6 +43,18 @@ If you see **`PS C:\...>`** you are in **PowerShell (Windows)**. Paths like `/mn
 
 ## On Windows: use WSL and run these inside Ubuntu
 
+### Quick run (one script)
+
+1. **Start Ubuntu (WSL)** — Open **"Ubuntu"** from Start, or run `wsl` in PowerShell.
+2. **Run the script** (installs deps + Flutter if needed, then runs the app):
+   ```bash
+   cd /mnt/c/Users/meena/Desktop/git/tv_app_books
+   bash scripts/run_linux.sh
+   ```
+   Enter your sudo password when prompted. First run may take several minutes (apt + Flutter clone).
+
+### Manual steps
+
 1. **Start Ubuntu (WSL)**  
    Open **“Ubuntu”** from the Start menu (or type `Ubuntu` in the search bar).  
    Or in PowerShell run: `wsl` — that switches you into WSL. You should see a prompt like `user@machine:~$`, not `PS C:\...>`.
@@ -57,7 +71,7 @@ If you see **`PS C:\...>`** you are in **PowerShell (Windows)**. Paths like `/mn
    Ubuntu packages:
    ```bash
    sudo apt-get update
-   sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+   sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libwebkit2gtk-4.1-dev
    ```
 
 4. **Build**  
