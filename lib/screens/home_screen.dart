@@ -6,6 +6,7 @@ import '../routes.dart';
 import '../widgets/book_card.dart';
 import '../services/api_service.dart';
 import '../services/database_service.dart';
+import '../utils/connectivity_helper.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,6 +22,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _licenseStatusMessage;
   bool _isStorageConnected = true;
   String? _storageLocation;
+  bool _hasInternet = true;
   
   // Books loaded from API or fallback to dummy data
   List<Book> _books = [];
@@ -232,6 +234,14 @@ class _HomeScreenState extends State<HomeScreen> {
     debugPrint('🚀 [HOME] Calling _checkLicenseStatus()...');
     debugPrint('');
     _checkLicenseStatus();
+    _checkConnectivity();
+  }
+
+  Future<void> _checkConnectivity() async {
+    final connected = await ConnectivityHelper.hasInternetConnection();
+    if (mounted) {
+      setState(() => _hasInternet = connected);
+    }
   }
   
   @override
@@ -494,15 +504,17 @@ class _HomeScreenState extends State<HomeScreen> {
           title: const Text('Bookshelf'),
           actions: [
             IconButton(
-              tooltip: 'Settings',
-              icon: const Icon(Icons.settings),
-              onPressed: () async {
-                final result = await Navigator.pushNamed(context, AppRoutes.settings);
-                // Reload license status and books when returning from settings
-                if (result == true || mounted) {
-                  _checkLicenseStatus();
-                }
-              },
+              tooltip: _hasInternet ? 'Settings' : 'Internet connection required',
+              icon: Icon(Icons.settings, color: _hasInternet ? null : Colors.grey),
+              onPressed: _hasInternet
+                  ? () async {
+                      final result = await Navigator.pushNamed(context, AppRoutes.settings);
+                      if (result == true || mounted) {
+                        _checkLicenseStatus();
+                        _checkConnectivity();
+                      }
+                    }
+                  : null,
             ),
           ],
         ),
@@ -558,13 +570,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(width: 16),
                       OutlinedButton.icon(
-                        onPressed: () async {
-                          final result = await Navigator.pushNamed(context, AppRoutes.settings);
-                          if (result == true || mounted) {
-                            _checkLicenseStatus();
-                          }
-                        },
-                        icon: const Icon(Icons.settings),
+                        onPressed: _hasInternet
+                            ? () async {
+                                final result = await Navigator.pushNamed(context, AppRoutes.settings);
+                                if (result == true || mounted) {
+                                  _checkLicenseStatus();
+                                  _checkConnectivity();
+                                }
+                              }
+                            : null,
+                        icon: Icon(Icons.settings, color: _hasInternet ? null : Colors.grey),
                         label: const Text('Settings'),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(
@@ -586,16 +601,29 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     textAlign: TextAlign.center,
                   ),
+                  if (!_hasInternet) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Internet connection required for Settings',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.orange.shade700,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                   const SizedBox(height: 32),
                   ElevatedButton.icon(
-                    onPressed: () async {
-                      final result = await Navigator.pushNamed(context, AppRoutes.settings);
-                      // Reload license status when returning from settings
-                      if (result == true || mounted) {
-                        _checkLicenseStatus();
-                      }
-                    },
-                    icon: const Icon(Icons.settings),
+                    onPressed: _hasInternet
+                        ? () async {
+                            final result = await Navigator.pushNamed(context, AppRoutes.settings);
+                            if (result == true || mounted) {
+                              _checkLicenseStatus();
+                              _checkConnectivity();
+                            }
+                          }
+                        : null,
+                    icon: Icon(Icons.settings, color: _hasInternet ? null : Colors.grey),
                     label: const Text('Go to Settings'),
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
@@ -626,18 +654,20 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Bookshelf'),
         actions: [
           IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings),
-            onPressed: () async {
-              final result = await Navigator.pushNamed(context, AppRoutes.settings);
-              // Reload license status and books when returning from settings
-              if (mounted) {
-                await _checkLicenseStatus();
-                if (_isLicenseActivated) {
-                  await _loadBooks();
-                }
-              }
-            },
+            tooltip: _hasInternet ? 'Settings' : 'Internet connection required',
+            icon: Icon(Icons.settings, color: _hasInternet ? null : Colors.grey),
+            onPressed: _hasInternet
+                ? () async {
+                    final result = await Navigator.pushNamed(context, AppRoutes.settings);
+                    if (mounted) {
+                      _checkConnectivity();
+                      await _checkLicenseStatus();
+                      if (_isLicenseActivated) {
+                        await _loadBooks();
+                      }
+                    }
+                  }
+                : null,
           ),
         ],
       ),

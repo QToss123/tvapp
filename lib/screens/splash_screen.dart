@@ -85,16 +85,29 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Text(
-              'BurlingtonEnglish',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
+          children: [
+            Image.asset(
+              'assets/app_icon.png',
+              width: 200,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Text(
+                'BurlingtonEnglish',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
             ),
-            SizedBox(height: 12),
-            Text('Loading...', style: TextStyle(fontSize: 14)),
+            const SizedBox(height: 24),
+            const Text(
+              'Loading...',
+              style: TextStyle(fontSize: 14, color: Colors.white70),
+            ),
           ],
         ),
       ),

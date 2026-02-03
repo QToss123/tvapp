@@ -4,6 +4,8 @@ import 'package:path/path.dart' as path;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import '../routes.dart';
 import '../widgets/file_browser.dart';
 import '../services/api_service.dart';
@@ -432,6 +434,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Text('• License and activation data'),
               const Text('• All app settings'),
               const Text('• Local book database'),
+              const Text('• All caches (images, decrypted books, temp files)'),
               if (hasStorage) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -497,23 +500,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     }
 
-    // 2. Clear local database
+    // 2. Clear local database and delete DB file
     try {
       final deletedCount = await DatabaseService.clearAllBooks();
       debugPrint('✅ Cleared $deletedCount books from local database');
+      await DatabaseService.close();
+      final docDir = await getApplicationDocumentsDirectory();
+      final dbFile = File(path.join(docDir.path, 'books.db'));
+      if (await dbFile.exists()) {
+        await dbFile.delete();
+        debugPrint('✅ Deleted database file');
+      }
     } catch (e) {
       debugPrint('❌ Error clearing database: $e');
     }
 
-    // 3. Clear SharedPreferences (app data)
-    await prefs.remove(_kLicenseNumber);
-    await prefs.remove(_kLicenseActivated);
-    await prefs.remove(_kLicenseExpiryDate);
-    await prefs.remove(_kLicenseToken);
-    await prefs.remove(_kSyncType);
-    await prefs.remove(_kStorageLocation);
-    await prefs.remove(_kSyncCompleted);
-    await prefs.remove(_kTVCursorEnabled);
+    // 3. Clear all caches
+    try {
+      await DefaultCacheManager().emptyCache();
+      debugPrint('✅ Cleared image cache (CachedNetworkImage)');
+    } catch (e) {
+      debugPrint('⚠️ Error clearing image cache: $e');
+    }
+    try {
+      final tempDir = await getTemporaryDirectory();
+      for (final dirName in ['decrypted_books', 'extracted_books']) {
+        final d = Directory(path.join(tempDir.path, dirName));
+        if (await d.exists()) {
+          await d.delete(recursive: true);
+          debugPrint('✅ Cleared $dirName cache');
+        }
+      }
+      final cacheDir = await getApplicationCacheDirectory();
+      if (await cacheDir.exists()) {
+        await for (final entity in cacheDir.list()) {
+          try {
+            if (entity is Directory) {
+              await entity.delete(recursive: true);
+            } else if (entity is File) {
+              await entity.delete();
+            }
+          } catch (_) {}
+        }
+        debugPrint('✅ Cleared application cache');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error clearing caches: $e');
+    }
+
+    // 4. Clear SharedPreferences (all app data)
+    await prefs.clear();
 
     if (!mounted) return;
     setState(() {
@@ -524,15 +560,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _tvCursorEnabled = Platform.isAndroid;
     });
 
-    debugPrint('✅ Reset complete: app data and books deleted');
+    debugPrint('✅ Reset complete: all data, caches, and books deleted');
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             hasStorage
-                ? 'Reset complete. App data and downloaded books have been deleted.'
-                : 'Reset complete. App data has been deleted.',
+                ? 'Reset complete. All data, caches, and downloaded books have been deleted.'
+                : 'Reset complete. All data and caches have been deleted.',
           ),
           duration: const Duration(seconds: 3),
           backgroundColor: Colors.green,
