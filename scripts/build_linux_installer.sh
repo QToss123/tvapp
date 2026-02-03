@@ -16,7 +16,8 @@ APP_ID="com.liqvid.tv_app_books"
 # Read version from pubspec.yaml (e.g. 1.0.0+1 -> 1.0.0)
 VERSION=$(grep -E '^version:' pubspec.yaml | sed 's/version: *\([0-9.]*\).*/\1/')
 ARCH="amd64"
-DEB_DIR="$PROJECT_DIR/build/linux_deb"
+# Use /tmp to avoid 777 permissions on WSL-mounted Windows drives
+DEB_DIR="${TMPDIR:-/tmp}/tv_app_books_deb_$$"
 BUNDLE_DIR="$PROJECT_DIR/build/linux/x64/release/bundle"
 
 echo "=== Building Ubuntu installer for $APP_DISPLAY ==="
@@ -37,6 +38,7 @@ fi
 echo ">>> Creating .deb package structure..."
 rm -rf "$DEB_DIR"
 mkdir -p "$DEB_DIR/DEBIAN"
+trap "rm -rf '$DEB_DIR'" EXIT
 mkdir -p "$DEB_DIR/opt/$INSTALL_DIR"
 mkdir -p "$DEB_DIR/usr/bin"
 mkdir -p "$DEB_DIR/usr/share/applications"

@@ -9,7 +9,7 @@ import '../models/book.dart';
 class DatabaseService {
   static Database? _database;
   static const String _databaseName = 'books.db';
-  static const int _databaseVersion = 4;
+  static const int _databaseVersion = 5;
   
   static const String _tableBooks = 'books';
   
@@ -64,6 +64,7 @@ class DatabaseService {
         $_colContentUrl TEXT,
         $_colFilePath TEXT,
         $_colEncBookId TEXT,
+        $_colEncBookPath TEXT,
         $_colEncKeyB64 TEXT,
         $_colEncNonceB64 TEXT,
         $_colSyncedAt INTEGER,
@@ -93,6 +94,14 @@ class DatabaseService {
     }
     if (oldVersion < 4) {
       await db.execute('ALTER TABLE $_tableBooks ADD COLUMN $_colThumbnailLocal TEXT');
+    }
+    // v5: Fix for DBs created with buggy v4 schema that lacked enc_book_path
+    if (oldVersion < 5) {
+      try {
+        await db.execute('ALTER TABLE $_tableBooks ADD COLUMN $_colEncBookPath TEXT');
+      } catch (_) {
+        // Column already exists (from migration 3 or fixed onCreate)
+      }
     }
   }
 

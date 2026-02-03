@@ -25,7 +25,7 @@ if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) {
 }
 
 # Fix CRLF line endings in shell scripts (Windows can add \r)
-$cmd = "cd '$WslPath' && sed -i 's/\r$//' scripts/build_linux_installer.sh scripts/run_linux.sh 2>/dev/null; bash scripts/build_linux_installer.sh"
+$cmd = "cd '$WslPath' && sed -i 's/\r$//' scripts/wsl_build_deb.sh 2>/dev/null; bash scripts/wsl_build_deb.sh"
 wsl -e bash -c $cmd
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

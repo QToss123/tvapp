@@ -18,6 +18,12 @@ class DirectionIntent extends Intent {
   const DirectionIntent(this.dir);
 }
 
+/// Intent for keyboard scroll (Linux/desktop when mouse scroll doesn't work)
+class ScrollIntent extends Intent {
+  final int deltaY;
+  const ScrollIntent(this.deltaY);
+}
+
 class ReadingScreen extends StatefulWidget {
   final Book book;
 
@@ -68,7 +74,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_useTvCursor && !_isLoading && _error == null) {
+    // Request focus for TV cursor (Android) or keyboard scroll (Linux/Windows)
+    if (!_isLoading && _error == null && (_useTvCursor || Platform.isLinux || Platform.isWindows)) {
       _requestWebViewFocus();
     }
   }
@@ -124,6 +131,60 @@ class _ReadingScreenState extends State<ReadingScreen> {
       await _controller.runJavaScript(jsCode);
     } catch (e) {
       debugPrint('❌ [READING] Error sending key to WebView: $e');
+    }
+  }
+
+  /// Builds WebView for desktop (Windows/Linux). On Linux, adds keyboard scroll
+  /// shortcuts because mouse scroll often doesn't work with webkit2gtk.
+  Widget _buildDesktopWebView() {
+    if (!Platform.isLinux && !Platform.isWindows) {
+      return WebViewWidget(controller: _controller);
+    }
+    const scrollAmount = 120;
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.arrowDown): ScrollIntent(scrollAmount),
+        SingleActivator(LogicalKeyboardKey.arrowUp): ScrollIntent(-scrollAmount),
+        SingleActivator(LogicalKeyboardKey.pageDown): ScrollIntent(400),
+        SingleActivator(LogicalKeyboardKey.pageUp): ScrollIntent(-400),
+        SingleActivator(LogicalKeyboardKey.space): ScrollIntent(400),
+        SingleActivator(LogicalKeyboardKey.space, shift: true): ScrollIntent(-400),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          ScrollIntent: CallbackAction<ScrollIntent>(
+            onInvoke: (intent) {
+              _scrollWebView(intent.deltaY);
+              return null;
+            },
+          ),
+        },
+        child: Focus(
+          focusNode: _webViewFocusNode,
+          autofocus: true,
+          child: Listener(
+            onPointerDown: (_) => _webViewFocusNode.requestFocus(),
+            child: WebViewWidget(controller: _controller),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Scrolls the WebView content (used when mouse scroll doesn't work on Linux).
+  /// Tries reader-view/reader-content first (EPUB viewer), then window.
+  Future<void> _scrollWebView(int deltaY) async {
+    try {
+      final js = '''
+        (function() {
+          var el = document.getElementById('reader-view') || document.getElementById('reader-content') || document.scrollingElement || document.documentElement;
+          if (el) el.scrollTop += $deltaY;
+          else window.scrollBy(0, $deltaY);
+        })();
+      ''';
+      await _controller.runJavaScript(js);
+    } catch (e) {
+      debugPrint('❌ [READING] Error scrolling WebView: $e');
     }
   }
 
@@ -701,19 +762,23 @@ class _ReadingScreenState extends State<ReadingScreen> {
       final bookUrl = 'http://127.0.0.1:$_serverPort/$urlPath';
       debugPrint('🌐 [READING] Loading book via localhost: $bookUrl');
       debugPrint('✅ [READING] All resources (CSS, JS, audio) will load via HTTP server');
-      
-      await _controller.loadRequest(Uri.parse(bookUrl));
 
-      if (dialogOpen && Navigator.canPop(context)) {
-        // Close dialog on success
-        // ignore: use_build_context_synchronously
-        Navigator.pop(context);
+      // On Linux/Windows, awaiting loadRequest can deadlock (WebView blocks while modal
+      // dialog is open). Fire load, close dialog immediately; page loads in background.
+      if (Platform.isLinux || Platform.isWindows) {
+        unawaited(_controller.loadRequest(Uri.parse(bookUrl)));
+        if (dialogOpen && Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+        debugPrint('✅ [READING] Load initiated, dialog closed (desktop)');
+      } else {
+        await _controller.loadRequest(Uri.parse(bookUrl));
+        if (dialogOpen && Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+        debugPrint('✅ [READING] Successfully loaded book via local HTTP server');
+        setState(() => _isLoading = false);
       }
-      
-      debugPrint('✅ [READING] Successfully loaded book via local HTTP server');
-      setState(() {
-        _isLoading = false;
-      });
     } catch (e) {
       debugPrint('❌ [READING] Failed to load file: $e');
       // Clean up on error
@@ -988,7 +1053,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
                         ),
                       ),
                     )
-                  : WebViewWidget(controller: _controller),
+                  : _buildDesktopWebView(),
             if (_isLoading && _error == null)
               Container(
                 color: Colors.white,
