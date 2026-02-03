@@ -749,22 +749,25 @@ class _ReadingScreenState extends State<ReadingScreen> {
       debugPrint('📄 [READING] Index HTML: $indexHtmlPath');
       
       await updateDialog(stepKey: 'Starting reader', message: 'Starting reader...');
-      // Start local HTTP server to serve book files
-      debugPrint('🚀 [READING] Starting local HTTP server...');
-      await _startLocalServer(bookDirectory);
-      
-      // Calculate relative path to index.html from book directory
-      final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path);
-      // Normalize path separators for URL
-      final urlPath = relativePath.replaceAll('\\', '/');
-      
-      // Load book via localhost HTTP server
-      final bookUrl = 'http://127.0.0.1:$_serverPort/$urlPath';
-      debugPrint('🌐 [READING] Loading book via localhost: $bookUrl');
-      debugPrint('✅ [READING] All resources (CSS, JS, audio) will load via HTTP server');
 
-      // On Linux/Windows, awaiting loadRequest can deadlock (WebView blocks while modal
-      // dialog is open). Fire load, close dialog immediately; page loads in background.
+      String bookUrl;
+      if (Platform.isLinux) {
+        // On Linux, file:// works reliably; webkit2gtk often fails to load localhost.
+        final absPath = path.absolute(indexHtmlPath);
+        bookUrl = 'file://${absPath.startsWith('/') ? '' : '/'}$absPath'
+            .replaceAll('\\', '/');
+        debugPrint('🌐 [READING] Loading book via file:// (Linux): $bookUrl');
+      } else {
+        // Start local HTTP server for Android/Windows
+        debugPrint('🚀 [READING] Starting local HTTP server...');
+        await _startLocalServer(bookDirectory);
+        final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path);
+        final urlPath = relativePath.replaceAll('\\', '/');
+        bookUrl = 'http://127.0.0.1:$_serverPort/$urlPath';
+        debugPrint('🌐 [READING] Loading book via localhost: $bookUrl');
+      }
+
+      // On Linux/Windows, awaiting loadRequest can deadlock. Fire load, close dialog.
       if (Platform.isLinux || Platform.isWindows) {
         unawaited(_controller.loadRequest(Uri.parse(bookUrl)));
         if (dialogOpen && Navigator.canPop(context)) {
@@ -776,7 +779,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         if (dialogOpen && Navigator.canPop(context)) {
           Navigator.pop(context);
         }
-        debugPrint('✅ [READING] Successfully loaded book via local HTTP server');
+        debugPrint('✅ [READING] Successfully loaded book');
         setState(() => _isLoading = false);
       }
     } catch (e) {
