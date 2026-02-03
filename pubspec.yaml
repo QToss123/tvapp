@@ -27,6 +27,7 @@ dependencies:
   cryptography_flutter: ^2.3.4
   workmanager: ^0.9.0
   cached_network_image: ^3.3.1
+  flutter_cache_manager: ^3.3.1
   uuid: ^4.2.1
 
 dev_dependencies:
@@ -34,6 +35,25 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   inno_bundle: ^0.11.2
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/app_icon.png
+  min_sdk_android: 21
+  web:
+    generate: true
+    image_path: assets/app_icon.png
+    background_color: "#000000"
+    theme_color: "#000000"
+  windows:
+    generate: true
+    image_path: assets/app_icon.png
+    icon_size: 256
+  linux:
+    generate: true
+    image_path: assets/app_icon.png
 
 inno_bundle:
   id: "7f3e2a1b-8c9d-4e5f-a6b7-1c2d3e4f5a6b"
@@ -47,4 +67,5 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/app_icon.png
 

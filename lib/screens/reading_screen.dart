@@ -45,6 +45,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
   HttpServer? _localServer;
   int _serverPort = 8080;
   final FocusNode _webViewFocusNode = FocusNode();
+  /// Linux fallback: HTTP URL to retry if file:// fails
+  String? _linuxHttpFallbackUrl;
   String? _decryptedCachePath;
   /// When true: TV cursor + D-pad key forwarding (Android TV). When false: plain WebView, no cursor (e.g. Windows).
   bool _useTvCursor = false;
@@ -316,6 +318,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
             });
           },
           onPageFinished: (String url) {
+            _linuxHttpFallbackUrl = null;
             setState(() {
               _isLoading = false;
             });
@@ -326,16 +329,27 @@ class _ReadingScreenState extends State<ReadingScreen> {
             }
           },
           onWebResourceError: (WebResourceError error) {
-            // Only show error for main page load, ignore resource errors (they're logged but not critical)
-            // Resource errors (like missing audio/images) are logged but don't break the page
             if (error.isForMainFrame == true) {
-              setState(() {
-                _isLoading = false;
-                _error = error.description;
-              });
-            }
-            // Log non-critical resource errors for debugging but don't show to user
-            if (error.isForMainFrame != true) {
+              // Linux: if file:// failed, retry with HTTP
+              final fallback = _linuxHttpFallbackUrl;
+              final errUrl = error.url;
+              if (Platform.isLinux &&
+                  fallback != null &&
+                  (errUrl == null || errUrl.isEmpty || errUrl.startsWith('file://'))) {
+                debugPrint('⚠️ [READING] file:// failed on Linux, retrying with HTTP...');
+                _linuxHttpFallbackUrl = null;
+                if (mounted) {
+                  _controller.loadRequest(Uri.parse(fallback));
+                }
+                return;
+              }
+              if (mounted) {
+                setState(() {
+                  _isLoading = false;
+                  _error = error.description;
+                });
+              }
+            } else {
               debugPrint('Resource load error (non-critical): ${error.url} - ${error.description}');
             }
           },
@@ -750,30 +764,36 @@ class _ReadingScreenState extends State<ReadingScreen> {
       
       await updateDialog(stepKey: 'Starting reader', message: 'Starting reader...');
 
+      // Always start server (needed for Android/Windows; kept ready for Linux fallback)
+      debugPrint('🚀 [READING] Starting local HTTP server...');
+      await _startLocalServer(bookDirectory);
+      final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path);
+      final urlPath = relativePath.replaceAll('\\', '/');
+      final httpUrl = 'http://127.0.0.1:$_serverPort/$urlPath';
+
       String bookUrl;
       if (Platform.isLinux) {
-        // On Linux, file:// works reliably; webkit2gtk often fails to load localhost.
-        final absPath = path.absolute(indexHtmlPath);
-        bookUrl = 'file://${absPath.startsWith('/') ? '' : '/'}$absPath'
-            .replaceAll('\\', '/');
+        // Linux: try file:// first (Uri.file for proper encoding). Fallback to HTTP if it fails.
+        bookUrl = Uri.file(indexHtmlPath).toString();
+        _linuxHttpFallbackUrl = httpUrl;
         debugPrint('🌐 [READING] Loading book via file:// (Linux): $bookUrl');
       } else {
-        // Start local HTTP server for Android/Windows
-        debugPrint('🚀 [READING] Starting local HTTP server...');
-        await _startLocalServer(bookDirectory);
-        final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path);
-        final urlPath = relativePath.replaceAll('\\', '/');
-        bookUrl = 'http://127.0.0.1:$_serverPort/$urlPath';
-        debugPrint('🌐 [READING] Loading book via localhost: $bookUrl');
+        _linuxHttpFallbackUrl = null;
+        bookUrl = httpUrl;
+        debugPrint('🌐 [READING] Loading book via HTTP: $bookUrl');
       }
 
-      // On Linux/Windows, awaiting loadRequest can deadlock. Fire load, close dialog.
       if (Platform.isLinux || Platform.isWindows) {
-        unawaited(_controller.loadRequest(Uri.parse(bookUrl)));
+        // Close dialog first to avoid deadlock, then load in next frame.
         if (dialogOpen && Navigator.canPop(context)) {
           Navigator.pop(context);
         }
-        debugPrint('✅ [READING] Load initiated, dialog closed (desktop)');
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _controller.loadRequest(Uri.parse(bookUrl));
+            debugPrint('✅ [READING] Load initiated after dialog closed (desktop)');
+          }
+        });
       } else {
         await _controller.loadRequest(Uri.parse(bookUrl));
         if (dialogOpen && Navigator.canPop(context)) {
