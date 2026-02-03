@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import '../routes.dart';
 import '../widgets/file_browser.dart';
 import '../services/api_service.dart';
@@ -515,12 +516,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       debugPrint('❌ Error clearing database: $e');
     }
 
-    // 3. Clear all caches
+    // 3. Clear all caches and WebView storage
     try {
       await DefaultCacheManager().emptyCache();
       debugPrint('✅ Cleared image cache (CachedNetworkImage)');
     } catch (e) {
       debugPrint('⚠️ Error clearing image cache: $e');
+    }
+    try {
+      await WebViewCookieManager().clearCookies();
+      debugPrint('✅ Cleared WebView cookies');
+    } catch (e) {
+      debugPrint('⚠️ Error clearing WebView cookies: $e');
     }
     try {
       final tempDir = await getTemporaryDirectory();
@@ -543,6 +550,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
           } catch (_) {}
         }
         debugPrint('✅ Cleared application cache');
+      }
+      final supportDir = await getApplicationSupportDirectory();
+      if (await supportDir.exists()) {
+        await for (final entity in supportDir.list()) {
+          try {
+            if (entity is Directory) {
+              await entity.delete(recursive: true);
+            } else if (entity is File) {
+              await entity.delete();
+            }
+          } catch (_) {}
+        }
+        debugPrint('✅ Cleared application support (WebView storage)');
+      }
+      final docsDir = await getApplicationDocumentsDirectory();
+      if (await docsDir.exists()) {
+        await for (final entity in docsDir.list()) {
+          try {
+            if (entity is Directory) {
+              await entity.delete(recursive: true);
+            } else if (entity is File) {
+              await entity.delete();
+            }
+          } catch (_) {}
+        }
+        debugPrint('✅ Cleared application documents');
+      }
+      if (Platform.isWindows) {
+        final localAppData = Platform.environment['LOCALAPPDATA'];
+        final roamingAppData = Platform.environment['APPDATA'];
+        final candidates = <String>[
+          if (localAppData != null) path.join(localAppData, 'BurlingtonEnglish'),
+          if (localAppData != null) path.join(localAppData, 'com.liqvid.tv_app_books'),
+          if (localAppData != null) path.join(localAppData, 'com.example', 'BurlingtonEnglish'),
+          if (roamingAppData != null) path.join(roamingAppData, 'BurlingtonEnglish'),
+          if (roamingAppData != null) path.join(roamingAppData, 'com.liqvid.tv_app_books'),
+        ];
+        for (final p in candidates) {
+          try {
+            final d = Directory(p);
+            if (await d.exists()) {
+              await d.delete(recursive: true);
+              debugPrint('✅ Cleared Windows app data: $p');
+            }
+          } catch (_) {}
+        }
+        if (localAppData != null) {
+          final tempDir = Directory(path.join(localAppData, 'Temp'));
+          if (await tempDir.exists()) {
+            await for (final entity in tempDir.list()) {
+              if (entity is Directory &&
+                  path.basename(entity.path).startsWith('tv_app_books')) {
+                try {
+                  await entity.delete(recursive: true);
+                  debugPrint('✅ Cleared temp app data: ${entity.path}');
+                } catch (_) {}
+              }
+            }
+          }
+        }
       }
     } catch (e) {
       debugPrint('⚠️ Error clearing caches: $e');
