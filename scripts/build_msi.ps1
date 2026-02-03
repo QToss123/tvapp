@@ -47,8 +47,8 @@ Write-Host "`n3. Building MSI installer..." -ForegroundColor Green
 $InstallerDir = Join-Path $ProjectRoot "installer"
 $OutputDir = Join-Path $ProjectRoot "build"
 Set-Location $InstallerDir
-wix build Product.wxs -arch x64 -bindpath Release="$ReleaseDir" -o "$OutputDir\TVAppBooks.msi"
+wix build Product.wxs -arch x64 -bindpath Release="$ReleaseDir" -o "$OutputDir\BurlingtonEnglish.msi"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Set-Location $ProjectRoot
-Write-Host "`nDone. MSI installer: build\TVAppBooks.msi" -ForegroundColor Green
+Write-Host "`nDone. MSI installer: build\BurlingtonEnglish.msi" -ForegroundColor Green

@@ -1,94 +1,75 @@
-import 'package:permission_handler/permission_handler.dart' as ph;
+import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart' as ph;
 
-/// Helper class for handling runtime permissions
+/// Helper class for handling runtime permissions (Android only; Windows/Linux need none)
 class PermissionHelper {
-  /// Requests storage permissions needed for folder access
-  /// Returns true if permissions are granted, false otherwise
+  /// Requests storage permissions needed for folder access (internal + external + USB).
+  /// On Android 11+: requests MANAGE_EXTERNAL_STORAGE (all files access).
+  /// On Android 10 and below: requests READ/WRITE_EXTERNAL_STORAGE.
+  /// Returns true if permissions are granted, false otherwise.
   static Future<bool> requestStoragePermissions() async {
+    if (!Platform.isAndroid) return true;
     try {
-      // Check Android version and request appropriate permissions
-      // For Android 13+ (API 33+), use scoped storage permissions
-      // For Android 11-12, use MANAGE_EXTERNAL_STORAGE if available
-      // For older versions, use READ_EXTERNAL_STORAGE
-      
-      // Try to request manage external storage first (Android 11+)
+      // Android 11+: MANAGE_EXTERNAL_STORAGE opens settings for "All files access"
       try {
-        final manageStorageStatus = await ph.Permission.manageExternalStorage.status;
-        if (manageStorageStatus.isGranted) {
-          debugPrint('Manage external storage permission already granted');
+        final status = await ph.Permission.manageExternalStorage.status;
+        if (status.isGranted) {
+          debugPrint('Manage external storage already granted');
           return true;
         }
-
-        // Request manage external storage (for full access on Android 11+)
-        final requestedStatus = await ph.Permission.manageExternalStorage.request();
-        if (requestedStatus.isGranted) {
-          debugPrint('Manage external storage permission granted');
-          return true;
+        final requested = await ph.Permission.manageExternalStorage.request();
+        if (requested.isGranted) return true;
+        if (requested.isPermanentlyDenied) {
+          debugPrint('Manage external storage permanently denied');
+          return false;
         }
       } catch (e) {
-        // manageExternalStorage might not be available, try storage permission
         debugPrint('Manage external storage not available: $e');
       }
 
-      // Fallback: Request read storage permission
+      // Android 10 and below: READ/WRITE_EXTERNAL_STORAGE
       try {
-        final storageStatus = await ph.Permission.storage.status;
-        if (storageStatus.isGranted) {
-          debugPrint('Storage permission already granted');
-          return true;
-        }
-
-        final requestedStatus = await ph.Permission.storage.request();
-        if (requestedStatus.isGranted) {
-          debugPrint('Storage permission granted');
-          return true;
-        }
-
-        // Check if permanently denied
-        if (requestedStatus.isPermanentlyDenied) {
-          debugPrint('Storage permission permanently denied');
-          return false;
-        }
-
-        debugPrint('Storage permission denied: $requestedStatus');
-        return false;
+        final status = await ph.Permission.storage.status;
+        if (status.isGranted) return true;
+        final requested = await ph.Permission.storage.request();
+        if (requested.isGranted) return true;
+        if (requested.isPermanentlyDenied) return false;
       } catch (e) {
-        debugPrint('Error requesting storage permission: $e');
-        return false;
+        debugPrint('Storage permission error: $e');
       }
+      return false;
     } catch (e) {
       debugPrint('Error requesting storage permissions: $e');
-      // If permission_handler fails, try to continue anyway
-      // Some devices might not need runtime permissions
       return false;
     }
   }
 
-  /// Checks if storage permissions are granted
-  static Future<bool> hasStoragePermissions() async {
+  /// Opens the All Files Access settings screen (Android 11+).
+  /// Call when MANAGE_EXTERNAL_STORAGE is denied so user can grant it manually.
+  static Future<bool> openAllFilesAccessSettings() async {
+    if (!Platform.isAndroid) return true;
     try {
-      // Check manage external storage first
-      try {
-        final status = await ph.Permission.manageExternalStorage.status;
-        if (status.isGranted) {
-          return true;
-        }
-      } catch (e) {
-        // manageExternalStorage might not be available
-        debugPrint('Cannot check manage external storage: $e');
-      }
+      final status = await ph.Permission.manageExternalStorage.status;
+      if (status.isGranted) return true;
+      await ph.Permission.manageExternalStorage.request();
+      return await ph.Permission.manageExternalStorage.isGranted;
+    } catch (e) {
+      debugPrint('Open all files access error: $e');
+      return await ph.openAppSettings();
+    }
+  }
 
-      // Check regular storage permission
+  /// Checks if storage permissions are granted (Android only)
+  static Future<bool> hasStoragePermissions() async {
+    if (!Platform.isAndroid) return true;
+    try {
       try {
-        final status = await ph.Permission.storage.status;
-        if (status.isGranted) {
-          return true;
-        }
-      } catch (e) {
-        debugPrint('Cannot check storage permission: $e');
-      }
-
+        if (await ph.Permission.manageExternalStorage.isGranted) return true;
+      } catch (_) {}
+      try {
+        if (await ph.Permission.storage.isGranted) return true;
+      } catch (_) {}
       return false;
     } catch (e) {
       debugPrint('Error checking storage permissions: $e');

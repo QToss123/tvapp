@@ -76,9 +76,9 @@ class _FileBrowserState extends State<FileBrowser> {
       return locations;
     }
 
-    // Linux: /, /home, /mnt, /media
+    // Linux: /, /home, /mnt, /media, /run/media (USB drives on modern distros)
     if (Platform.isLinux) {
-      final linuxRoots = ['/', '/home', '/mnt', '/media'];
+      final linuxRoots = ['/', '/home', '/mnt', '/media', '/run/media'];
       for (final root in linuxRoots) {
         try {
           final dir = Directory(root);
@@ -87,7 +87,7 @@ class _FileBrowserState extends State<FileBrowser> {
               await dir.list().first.timeout(const Duration(milliseconds: 500));
               locations.add(StorageLocation(
                 path: root,
-                name: root == '/' ? 'Root' : path.basename(root),
+                name: root == '/' ? 'Root' : root == '/run/media' ? 'External drives (USB)' : path.basename(root),
                 isInternal: root == '/home',
                 displayPath: root,
               ));
@@ -101,8 +101,7 @@ class _FileBrowserState extends State<FileBrowser> {
       }
     }
 
-    // Android: internal storage + USB drives
-    // Add internal storage options
+    // Android: internal storage + external SD + USB drives
     final internalPaths = [
       '/storage/emulated/0',
       '/sdcard',
@@ -133,7 +132,30 @@ class _FileBrowserState extends State<FileBrowser> {
       }
     }
     
-    // Check /mnt/media_rw FIRST for USB drives (more reliable on Android TV)
+    // Check /mnt/expand for adopted storage (external SD formatted as internal)
+    try {
+      final expandDir = Directory('/mnt/expand');
+      if (await expandDir.exists()) {
+        await for (final entity in expandDir.list()) {
+          if (entity is Directory) {
+            try {
+              await entity.list().first.timeout(const Duration(milliseconds: 500));
+              final p = entity.path;
+              if (!locations.any((l) => l.path == p)) {
+                locations.add(StorageLocation(
+                  path: p,
+                  name: 'External storage (${path.basename(p)})',
+                  isInternal: false,
+                  displayPath: p,
+                ));
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Check /mnt/media_rw for USB drives (more reliable on Android TV)
     try {
       final mediaRwDir = Directory('/mnt/media_rw');
       if (await mediaRwDir.exists()) {

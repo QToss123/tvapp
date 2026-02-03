@@ -1,5 +1,5 @@
 name: tv_app_books
-description: "Burlington - Bookshelf App (Android + Windows + Linux)"
+description: "BurlingtonEnglish - Bookshelf App (Android + Windows + Linux)"
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -27,6 +27,7 @@ dependencies:
   cryptography_flutter: ^2.3.4
   workmanager: ^0.9.0
   cached_network_image: ^3.3.1
+  uuid: ^4.2.1
 
 dev_dependencies:
   flutter_test:
@@ -36,8 +37,8 @@ dev_dependencies:
 
 inno_bundle:
   id: "7f3e2a1b-8c9d-4e5f-a6b7-1c2d3e4f5a6b"
-  name: "TV App Books"
-  description: "Burlington - Bookshelf App (Android + Windows + Linux)"
+  name: "BurlingtonEnglish"
+  description: "BurlingtonEnglish - Bookshelf App (Android + Windows + Linux)"
   installer_icon: "windows/runner/resources/app_icon.ico"
   admin: false
   arch: "x64_compatible"

@@ -8,7 +8,7 @@ if (-not (Test-Path (Join-Path $ProjectRoot "pubspec.yaml"))) {
 }
 
 Set-Location $ProjectRoot
-Write-Host "=== Building release for TV App Books ===" -ForegroundColor Cyan
+Write-Host "=== Building release for BurlingtonEnglish ===" -ForegroundColor Cyan
 Write-Host "Project: $ProjectRoot" -ForegroundColor Cyan
 Write-Host ""
 

@@ -1,6 +1,6 @@
-# TV App Books (Linux)
+# BurlingtonEnglish (Linux)
 
-**Burlington – Bookshelf App** – A Flutter app for reading books on Linux. Supports EPUB and other formats with sync capabilities.
+**BurlingtonEnglish – Bookshelf App** – A Flutter app for reading books on Linux. Supports EPUB and other formats with sync capabilities.
 
 ---
 
@@ -35,14 +35,14 @@ rm -rf build/linux   # if you moved the project, clear old cache
 bash scripts/build_linux_installer.sh
 ```
 
-**Output:** `build/tv-app-books_1.0.0_amd64.deb`
+**Output:** `build/burlingtonenglish_1.0.0_amd64.deb`
 
 ---
 
 ## Install the .deb
 
 ```bash
-sudo dpkg -i build/tv-app-books_1.0.0_amd64.deb
+sudo dpkg -i build/burlingtonenglish_1.0.0_amd64.deb
 sudo apt-get install -f
 ```
 
@@ -50,14 +50,14 @@ sudo apt-get install -f
 ```bash
 tv_app_books
 ```
-Or launch **TV App Books** from the application menu.
+Or launch **BurlingtonEnglish** from the application menu.
 
 ---
 
 ## Uninstall
 
 ```bash
-sudo apt remove tv-app-books
+sudo apt remove burlingtonenglish
 ```
 
 ---

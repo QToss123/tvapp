@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "tv_app_books" "\0"
+            VALUE "FileDescription", "BurlingtonEnglish" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "tv_app_books" "\0"
+            VALUE "InternalName", "BurlingtonEnglish" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
             VALUE "OriginalFilename", "tv_app_books.exe" "\0"
-            VALUE "ProductName", "tv_app_books" "\0"
+            VALUE "ProductName", "BurlingtonEnglish" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

@@ -13,7 +13,7 @@ $drive = $ProjectRoot.Substring(0, 1).ToLower()
 $pathPart = $ProjectRoot.Substring(3) -replace '\\', '/'
 $WslPath = "/mnt/$drive/$pathPart"
 
-Write-Host "=== Building Linux release for TV App Books ===" -ForegroundColor Cyan
+Write-Host "=== Building Linux release for BurlingtonEnglish ===" -ForegroundColor Cyan
 Write-Host "Project: $ProjectRoot" -ForegroundColor Cyan
 Write-Host "WSL path: $WslPath" -ForegroundColor Cyan
 Write-Host ""
@@ -30,4 +30,4 @@ wsl -e bash -c $cmd
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "Done. Output: build/tv-app-books_*.deb" -ForegroundColor Green
+Write-Host "Done. Output: build/burlingtonenglish_*.deb" -ForegroundColor Green

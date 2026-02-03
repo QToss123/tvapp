@@ -75,7 +75,7 @@ dart run inno_bundle
 Installer options are in `pubspec.yaml` under `inno_bundle`:
 
 - **id** – AppId (GUID). Do not change after release.
-- **name** – Display name (e.g. "TV App Books").
+- **name** – Display name (e.g. "BurlingtonEnglish").
 - **installer_icon** – `.ico` used for the installer.
 - **admin** – `false` = user install, `true` = machine-wide, `auto` = user choice.
 

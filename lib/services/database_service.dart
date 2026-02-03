@@ -9,7 +9,7 @@ import '../models/book.dart';
 class DatabaseService {
   static Database? _database;
   static const String _databaseName = 'books.db';
-  static const int _databaseVersion = 3;
+  static const int _databaseVersion = 4;
   
   static const String _tableBooks = 'books';
   
@@ -19,6 +19,7 @@ class DatabaseService {
   static const String _colAuthor = 'author';
   static const String _colProgress = 'progress';
   static const String _colThumbnail = 'thumbnail';
+  static const String _colThumbnailLocal = 'thumbnail_local';
   static const String _colContentUrl = 'content_url';
   static const String _colFilePath = 'file_path';
   static const String _colEncBookId = 'enc_book_id';
@@ -59,6 +60,7 @@ class DatabaseService {
         $_colAuthor TEXT NOT NULL,
         $_colProgress INTEGER DEFAULT 0,
         $_colThumbnail TEXT,
+        $_colThumbnailLocal TEXT,
         $_colContentUrl TEXT,
         $_colFilePath TEXT,
         $_colEncBookId TEXT,
@@ -89,6 +91,9 @@ class DatabaseService {
     if (oldVersion < 3) {
       await db.execute('ALTER TABLE $_tableBooks ADD COLUMN $_colEncBookPath TEXT');
     }
+    if (oldVersion < 4) {
+      await db.execute('ALTER TABLE $_tableBooks ADD COLUMN $_colThumbnailLocal TEXT');
+    }
   }
 
   /// Inserts a book into the database
@@ -115,6 +120,7 @@ class DatabaseService {
       _colAuthor: book.author,
       _colProgress: book.progress,
       _colThumbnail: book.thumbnail,
+      _colThumbnailLocal: book.thumbnailLocalPath,
       _colContentUrl: book.contentUrl,
       _colFilePath: filePath,
       _colEncBookId: book.encBookId,
@@ -181,6 +187,7 @@ class DatabaseService {
         final courseId = maps[i][_colCourseId];
         final author = maps[i][_colAuthor] ?? 'Unknown';
         final thumbnail = maps[i][_colThumbnail];
+        final thumbnailLocal = maps[i][_colThumbnailLocal];
         final filePath = maps[i][_colFilePath];
         final contentUrlRaw = maps[i][_colContentUrl];
         final encBookId = maps[i][_colEncBookId];
@@ -219,6 +226,7 @@ class DatabaseService {
           author: author,
           progress: maps[i][_colProgress] ?? 0,
           thumbnail: thumbnail,
+          thumbnailLocalPath: thumbnailLocal as String?,
           contentUrl: contentUrl,
           encBookId: encBookId as String?,
           encBookPath: maps[i][_colEncBookPath] as String?,
@@ -289,6 +297,7 @@ class DatabaseService {
           author: maps[i][_colAuthor] ?? 'Unknown',
           progress: maps[i][_colProgress] ?? 0,
           thumbnail: maps[i][_colThumbnail],
+          thumbnailLocalPath: maps[i][_colThumbnailLocal] as String?,
           contentUrl: contentUrl,
           encBookId: encBookId as String?,
           encBookPath: maps[i][_colEncBookPath] as String?,
@@ -399,6 +408,7 @@ class DatabaseService {
       author: maps[0][_colAuthor],
       progress: maps[0][_colProgress] ?? 0,
       thumbnail: maps[0][_colThumbnail],
+      thumbnailLocalPath: maps[0][_colThumbnailLocal] as String?,
       contentUrl: contentUrl,
       encBookId: encBookId as String?,
       encBookPath: maps[0][_colEncBookPath] as String?,
@@ -462,6 +472,7 @@ class DatabaseService {
       author: row[_colAuthor],
       progress: row[_colProgress] ?? 0,
       thumbnail: row[_colThumbnail],
+      thumbnailLocalPath: row[_colThumbnailLocal] as String?,
       contentUrl: contentUrl,
       encBookId: encBookId as String?,
       encBookPath: row[_colEncBookPath] as String?,

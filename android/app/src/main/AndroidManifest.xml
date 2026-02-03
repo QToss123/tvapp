@@ -4,15 +4,18 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     
-    <!-- Storage Permissions for folder picker and external storage access -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!-- Storage: full access to internal + external (USB, SD card) on all Android versions -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" 
+        android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
         android:maxSdkVersion="32" />
     
-    <!-- For Android 13+ (API 33+) - Media permissions -->
+    <!-- Android 13+ (API 33+): granular media permissions -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    
+    <!-- Android 11+ (API 30+): all files access - required to select any folder (internal/external/USB) -->
     
     <!-- Network Permissions (if downloading books from server) -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -30,7 +33,6 @@
     <!-- Notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     
-    <!-- For accessing external storage on Android TV (if needed) -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" 
         tools:ignore="ScopedStorage" />
     
@@ -39,7 +41,7 @@
         android:maxSdkVersion="28" />
     
     <application
-        android:label="Burlington"
+        android:label="BurlingtonEnglish"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true"
@@ -84,6 +86,10 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Allow opening All Files Access settings (Android 11+) -->
+        <intent>
+            <action android:name="android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION"/>
         </intent>
     </queries>
 </manifest>

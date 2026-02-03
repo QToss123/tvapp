@@ -1,13 +1,21 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/book.dart';
 import '../routes.dart';
 
-class BookCard extends StatelessWidget {
+class BookCard extends StatefulWidget {
   final Book book;
   final bool isFocused;
 
   const BookCard({super.key, required this.book, this.isFocused = false});
+
+  @override
+  State<BookCard> createState() => _BookCardState();
+}
+
+class _BookCardState extends State<BookCard> {
+  bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
@@ -15,44 +23,45 @@ class BookCard extends StatelessWidget {
       child: Builder(
         builder: (context) {
           final hasFocus = Focus.of(context).hasFocus;
-          return InkWell(
-            onTap: () {
-              Navigator.pushNamed(
-                context,
-                AppRoutes.reading,
-                arguments: book,
-              );
-            },
-            borderRadius: BorderRadius.circular(8),
-            child: Card(
-      elevation: hasFocus || isFocused ? 8 : 3,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: hasFocus || isFocused
-            ? const BorderSide(color: Colors.blue, width: 3)
-            : BorderSide.none,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Thumbnail with title overlay
-          Stack(
-            children: [
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
-                  child: AspectRatio(
-                  aspectRatio: 2 / 3,
-                  child: book.thumbnail != null && book.thumbnail!.isNotEmpty
-                      ? CachedNetworkImage(
-                          imageUrl: book.thumbnail!,
-                          fit: BoxFit.cover,
-                          placeholder: (_, __) => _buildPlaceholderThumbnail(),
-                          errorWidget: (_, __, ___) => _buildPlaceholderThumbnail(),
-                        )
-                      : _buildPlaceholderThumbnail(),
-                ),
-              ),
-              // Gradient overlay at bottom for title readability
+          final isHighlighted = hasFocus || widget.isFocused || _isHovered;
+          return MouseRegion(
+            onEnter: (_) => setState(() => _isHovered = true),
+            onExit: (_) => setState(() => _isHovered = false),
+            cursor: SystemMouseCursors.click,
+            child: AnimatedScale(
+              scale: isHighlighted ? 1.05 : 1.0,
+              duration: const Duration(milliseconds: 150),
+              child: InkWell(
+                onTap: () {
+                  Navigator.pushNamed(
+                    context,
+                    AppRoutes.reading,
+                    arguments: widget.book,
+                  );
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Card(
+                  elevation: isHighlighted ? 12 : 3,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: isHighlighted
+                        ? const BorderSide(color: Colors.blueAccent, width: 4)
+                        : BorderSide.none,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Thumbnail with title overlay
+                      Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+                            child: AspectRatio(
+                              aspectRatio: 2 / 3,
+                              child: _buildThumbnail(),
+                            ),
+                          ),
+                          // Gradient overlay at bottom for title readability
               Positioned(
                 bottom: 0,
                 left: 0,
@@ -79,7 +88,7 @@ class BookCard extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                   child: Text(
-                    book.title,
+                    widget.book.title,
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
@@ -112,7 +121,7 @@ class BookCard extends StatelessWidget {
               ),
             ),
             child: Text(
-              book.author,
+              widget.book.author,
               style: TextStyle(
                 fontSize: 10,
                 color: Colors.grey.shade800,
@@ -124,12 +133,37 @@ class BookCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    ),
-  );
+                  ),
+                ),
+              ),
+            ),
+          );
         },
       ),
     );
+  }
+
+  /// Prefers local thumbnail for offline; falls back to network.
+  Widget _buildThumbnail() {
+    final localPath = widget.book.thumbnailLocalPath;
+    if (localPath != null && localPath.isNotEmpty) {
+      final file = File(localPath);
+      return Image.file(
+        file,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _buildPlaceholderThumbnail(),
+      );
+    }
+    final thumbUrl = widget.book.thumbnail;
+    if (thumbUrl != null && thumbUrl.isNotEmpty && thumbUrl.startsWith('http')) {
+      return CachedNetworkImage(
+        imageUrl: thumbUrl,
+        fit: BoxFit.cover,
+        placeholder: (_, __) => _buildPlaceholderThumbnail(),
+        errorWidget: (_, __, ___) => _buildPlaceholderThumbnail(),
+      );
+    }
+    return _buildPlaceholderThumbnail();
   }
 
   Widget _buildPlaceholderThumbnail() {

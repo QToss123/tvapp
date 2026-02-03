@@ -141,11 +141,11 @@ To build a `.deb` package for distribution:
    cd /mnt/c/Users/meena/Desktop/git/tv_app_books
    bash scripts/build_linux_installer.sh
    ```
-3. **Output** — `build/tv-app-books_1.0.0_amd64.deb` (version from `pubspec.yaml`).
+3. **Output** — `build/burlingtonenglish_1.0.0_amd64.deb` (version from `pubspec.yaml`).
 
 **Install on another Ubuntu machine:**
 ```bash
-sudo dpkg -i tv-app-books_1.0.0_amd64.deb
+sudo dpkg -i burlingtonenglish_1.0.0_amd64.deb
 sudo apt-get install -f   # fix any missing dependencies
 ```
 

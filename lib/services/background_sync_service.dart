@@ -3,9 +3,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
+import 'package:path/path.dart' as path;
 import 'api_service.dart';
 import 'database_service.dart';
 import '../models/book.dart';
+import '../utils/thumbnail_helper.dart';
 
 const _taskName = 'book_sync_task';
 const _prefCourses = 'background_sync_courses';
@@ -75,11 +77,21 @@ Future<void> _runBackgroundSync() async {
 
       final thumb = course['thumbnail']?.toString() ??
           course['product_thumbnail']?.toString();
+      String? thumbnailLocalPath;
+      if (thumb != null && thumb.isNotEmpty && thumb.startsWith('http')) {
+        final thumbnailsDir = path.join(storageLocation, 'thumbnails');
+        thumbnailLocalPath = await ThumbnailHelper.downloadAndSave(
+          thumb,
+          thumbnailsDir: thumbnailsDir,
+          id: encBookId ?? 'course_$courseId',
+        );
+      }
       final book = Book(
         title: title,
         author: productName,
         progress: 0,
         thumbnail: thumb,
+        thumbnailLocalPath: thumbnailLocalPath,
         contentUrl: finalPath != null && finalPath.startsWith('/')
             ? 'file://$finalPath'
             : finalPath != null && finalPath.startsWith('file://')

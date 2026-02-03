@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,6 +6,7 @@ import 'package:path/path.dart' as path;
 import 'dart:io';
 import '../services/api_service.dart';
 import '../services/database_service.dart';
+import '../utils/thumbnail_helper.dart';
 import '../models/book.dart';
 import '../routes.dart';
 import '../utils/zip_handler.dart';
@@ -78,6 +80,23 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
+  /// Updates _statusMessage and _downloadedBooks from current _syncItems state.
+  void _updateStatusFromItems() {
+    final done = _syncItems.where((s) => s.status == 'done').length;
+    final downloading = _syncItems.where((s) => s.status == 'downloading').length;
+    final paused = _syncItems.where((s) => s.status == 'paused').length;
+    final error = _syncItems.where((s) => s.status == 'error').length;
+    _downloadedBooks = done;
+    final total = _syncItems.length;
+    if (downloading > 0 || paused > 0 || (done > 0 && done < total && !_syncComplete)) {
+      final parts = <String>['$done done'];
+      if (downloading > 0) parts.add('$downloading downloading');
+      if (paused > 0) parts.add('$paused paused');
+      if (error > 0) parts.add('$error failed');
+      _statusMessage = '${parts.join(', ')} ($total total)';
+    }
+  }
+
   Future<void> _runDownloadsNow() async {
     if (_storageLocationForSync == null) return;
     final selectedItems = _syncItems.where((s) => s.selected).toList();
@@ -101,12 +120,15 @@ class _SyncScreenState extends State<SyncScreen> {
     await Future.wait(futures);
     await DatabaseService.logAllBooks();
     final done = _syncItems.where((s) => s.status == 'done').length;
+    final paused = _syncItems.where((s) => s.status == 'paused').length;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('syncCompleted', true);
     setState(() {
       _isLoading = false;
       _downloadedBooks = done;
-      _statusMessage = 'Sync complete! Downloaded $done/${_syncItems.length} books.';
+      _statusMessage = paused > 0
+          ? 'Sync complete! Downloaded $done/${_syncItems.length} books. $paused paused.'
+          : 'Sync complete! Downloaded $done/${_syncItems.length} books.';
       _syncComplete = true;
     });
   }
@@ -288,7 +310,7 @@ class _SyncScreenState extends State<SyncScreen> {
           setState(() {
             item.status = 'done';
             item.progress = 100;
-            _downloadedBooks = _syncItems.where((s) => s.status == 'done').length;
+            _updateStatusFromItems();
           });
         }
         return;
@@ -304,6 +326,7 @@ class _SyncScreenState extends State<SyncScreen> {
       setState(() {
         if (status != null) item.status = status;
         if (progress != null) item.progress = progress;
+        _updateStatusFromItems();
       });
     }
 
@@ -341,11 +364,22 @@ class _SyncScreenState extends State<SyncScreen> {
 
       final encBookPath = downloadResult['encBookPath'] as String?;
       final thumb = course['thumbnail']?.toString() ?? course['product_thumbnail']?.toString();
+      String? thumbnailLocalPath;
+      if (thumb != null && thumb.isNotEmpty && thumb.startsWith('http')) {
+        final thumbnailsDir = path.join(storageLocation, 'thumbnails');
+        final id = encBookId ?? 'course_$courseId';
+        thumbnailLocalPath = await ThumbnailHelper.downloadAndSave(
+          thumb,
+          thumbnailsDir: thumbnailsDir,
+          id: id,
+        );
+      }
       final book = Book(
         title: title,
         author: productName,
         progress: 0,
         thumbnail: thumb,
+        thumbnailLocalPath: thumbnailLocalPath,
         contentUrl: finalPath != null && finalPath.startsWith('/')
             ? 'file://$finalPath'
             : finalPath != null && finalPath.startsWith('file://')
@@ -359,11 +393,6 @@ class _SyncScreenState extends State<SyncScreen> {
 
       await DatabaseService.insertBook(book, courseId: courseId, filePath: finalPath);
       update(status: 'done', progress: 100);
-      if (mounted) {
-        setState(() {
-          _downloadedBooks = _syncItems.where((s) => s.status == 'done').length;
-        });
-      }
       debugPrint('✅ Downloaded: $title');
     } catch (e) {
       debugPrint('Error downloading book $title: $e');
@@ -506,13 +535,24 @@ class _SyncScreenState extends State<SyncScreen> {
           if (bookFound && bookPath != null) {
             // Store path as-is (ZIP or folder); extraction happens when user opens book
             final finalPath = bookPath;
+            final thumb = product['thumbnail']?.toString() ?? product['thumbnail_url']?.toString();
+            String? thumbnailLocalPath;
+            if (thumb != null && thumb.isNotEmpty && thumb.startsWith('http')) {
+              final thumbnailsDir = path.join(storageLocation, 'thumbnails');
+              thumbnailLocalPath = await ThumbnailHelper.downloadAndSave(
+                thumb,
+                thumbnailsDir: thumbnailsDir,
+                id: 'course_$courseId',
+              );
+            }
 
             // Create book object
             final book = Book(
               title: title,
               author: author,
               progress: 0,
-              thumbnail: product['thumbnail']?.toString() ?? product['thumbnail_url']?.toString(),
+              thumbnail: thumb,
+              thumbnailLocalPath: thumbnailLocalPath,
               contentUrl: finalPath != null && finalPath.startsWith('/')
                   ? 'file://$finalPath'
                   : finalPath != null && finalPath.startsWith('file://')
@@ -629,16 +669,33 @@ class _SyncScreenState extends State<SyncScreen> {
                 !_syncComplete &&
                 !_isLoading) ...[
               const SizedBox(height: 12),
+              Builder(
+                builder: (context) {
+                  final selectedCount = _syncItems.where((s) => s.selected).length;
+                  return Text(
+                    '${selectedCount} of ${_syncItems.length} selected (check/uncheck to choose which to download)',
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
               Row(
                 children: [
                   Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _runDownloadsNow,
-                      icon: const Icon(Icons.download),
-                      label: const Text('Download all'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
+                    child: Builder(
+                      builder: (context) {
+                        final selectedCount = _syncItems.where((s) => s.selected).length;
+                        return ElevatedButton.icon(
+                          onPressed: selectedCount > 0 ? _runDownloadsNow : null,
+                          icon: const Icon(Icons.download),
+                          label: Text(selectedCount > 0
+                              ? 'Download ($selectedCount selected)'
+                              : 'Select at least 1 book'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        );
+                      },
                     ),
                   ),
                   if (Platform.isAndroid) ...[
@@ -810,11 +867,22 @@ class _SyncItemGridTile extends StatelessWidget {
                   Positioned(
                     top: 2,
                     left: 2,
-                    child: Checkbox(
-                      value: item.selected,
-                      onChanged: (v) => onSelectChanged!(v ?? true),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
+                    child: Material(
+                      color: Colors.white.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(4),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(4),
+                        onTap: () => onSelectChanged!(!item.selected),
+                        child: Padding(
+                          padding: const EdgeInsets.all(2),
+                          child: Checkbox(
+                            value: item.selected,
+                            onChanged: (v) => onSelectChanged!(v ?? true),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 if (isDone)

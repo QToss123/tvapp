@@ -888,9 +888,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // On Windows (and desktop), WebView platform view draws on top of Flutter
+    // On Windows/Linux (desktop), WebView platform view draws on top of Flutter
     // overlays. Use AppBar so the back button is in a dedicated area above the WebView.
-    final useAppBarForBack = Platform.isWindows;
+    final useAppBarForBack = Platform.isWindows || Platform.isLinux;
 
     return PopScope(
       canPop: true,

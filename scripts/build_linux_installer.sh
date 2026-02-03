@@ -9,8 +9,9 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 
 APP_NAME="tv_app_books"
-PACKAGE_NAME="tv-app-books"
-APP_DISPLAY="TV App Books"
+PACKAGE_NAME="burlingtonenglish"
+INSTALL_DIR="burlingtonenglish"
+APP_DISPLAY="BurlingtonEnglish"
 APP_ID="com.liqvid.tv_app_books"
 # Read version from pubspec.yaml (e.g. 1.0.0+1 -> 1.0.0)
 VERSION=$(grep -E '^version:' pubspec.yaml | sed 's/version: *\([0-9.]*\).*/\1/')
@@ -36,27 +37,27 @@ fi
 echo ">>> Creating .deb package structure..."
 rm -rf "$DEB_DIR"
 mkdir -p "$DEB_DIR/DEBIAN"
-mkdir -p "$DEB_DIR/opt/$APP_NAME"
+mkdir -p "$DEB_DIR/opt/$INSTALL_DIR"
 mkdir -p "$DEB_DIR/usr/bin"
 mkdir -p "$DEB_DIR/usr/share/applications"
 mkdir -p "$DEB_DIR/usr/share/icons/hicolor/512x512/apps"
 
 # Copy app bundle to /opt
-cp -r "$BUNDLE_DIR"/* "$DEB_DIR/opt/$APP_NAME/"
+cp -r "$BUNDLE_DIR"/* "$DEB_DIR/opt/$INSTALL_DIR/"
 
 # Launcher script (runs from app dir so lib/ and data/ resolve correctly)
-cat > "$DEB_DIR/usr/bin/$APP_NAME" << 'LAUNCHER'
+cat > "$DEB_DIR/usr/bin/$APP_NAME" << LAUNCHER
 #!/bin/bash
-exec /opt/tv_app_books/tv_app_books "$@"
+exec /opt/$INSTALL_DIR/$APP_NAME "\$@"
 LAUNCHER
 chmod 755 "$DEB_DIR/usr/bin/$APP_NAME"
 
 # .desktop file for app menu
 cat > "$DEB_DIR/usr/share/applications/$APP_ID.desktop" << DESKTOP
 [Desktop Entry]
-Name=TV App Books
-Comment=Burlington - Bookshelf App
-Exec=/opt/tv_app_books/tv_app_books
+Name=BurlingtonEnglish
+Comment=BurlingtonEnglish - Bookshelf App
+Exec=/opt/$INSTALL_DIR/$APP_NAME
 Icon=$APP_ID
 Type=Application
 Categories=Office;Viewer;
@@ -76,8 +77,8 @@ Section: office
 Priority: optional
 Architecture: $ARCH
 Depends: libgtk-3-0, libblkid1, liblzma5, libwebkit2gtk-4.1-0
-Maintainer: TV App Books <noreply@example.com>
-Description: Burlington - Bookshelf App
+Maintainer: BurlingtonEnglish <noreply@example.com>
+Description: BurlingtonEnglish - Bookshelf App
  A Flutter app for reading books on Android, Windows, and Linux.
  .
  Supports EPUB and other book formats with sync capabilities.

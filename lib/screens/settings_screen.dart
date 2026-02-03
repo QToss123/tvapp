@@ -397,6 +397,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     // Save settings
     final prefs = await SharedPreferences.getInstance();
+    await _clearBooksIfStorageChanged(prefs);
     await prefs.setString(_kSyncType, _syncType);
     await prefs.setString(_kStorageLocation, _storageLocation);
     
@@ -603,16 +604,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
                       onPressed: () async {
-                        final String? location = await Navigator.of(context).push<String>(
-                          MaterialPageRoute(
-                            builder: (context) => FileBrowser(
-                              initialPath: selectedLocation,
-                              selectDirectory: true,
-                              title: 'Select Storage Location',
-                            ),
-                          ),
+                        final String? location = await _selectStoragePath(
+                          initialPath: selectedLocation,
                         );
-                        
                         if (location != null) {
                           setDialogState(() {
                             selectedLocation = location;
@@ -683,9 +677,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
              location != 'Not selected');
   }
 
+  /// Clears books from DB when storage location changes (avoids showing books from old folder)
+  Future<void> _clearBooksIfStorageChanged(SharedPreferences prefs) async {
+    final oldStorage = prefs.getString(_kStorageLocation);
+    final storageChanged = oldStorage != null &&
+        oldStorage.isNotEmpty &&
+        oldStorage != 'Not selected' &&
+        oldStorage != _storageLocation;
+    if (storageChanged) {
+      try {
+        await DatabaseService.clearAllBooks();
+        debugPrint('📂 Cleared books: storage changed from "$oldStorage" to "$_storageLocation"');
+      } catch (e) {
+        debugPrint('⚠️ Error clearing books on storage change: $e');
+      }
+    }
+  }
+
   /// Saves settings and navigates to sync screen
   Future<void> _saveAndProceedToSync() async {
     final prefs = await SharedPreferences.getInstance();
+    await _clearBooksIfStorageChanged(prefs);
     await prefs.setString(_kSyncType, _syncType);
     await prefs.setString(_kStorageLocation, _storageLocation);
     // Mark sync as not completed yet
@@ -698,9 +710,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  /// Returns selected folder path, or null. Offers system picker and browse.
+  Future<String?> _selectStoragePath({String? initialPath}) async {
+    if (!mounted) return null;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Storage Location'),
+        content: const Text(
+          'System picker: native dialog (internal + external storage)\n\n'
+          'Browse folders: navigate through folders',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, null), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, 'picker'), child: const Text('System picker')),
+          TextButton(onPressed: () => Navigator.pop(context, 'browse'), child: const Text('Browse folders')),
+        ],
+      ),
+    );
+    if (choice == 'picker') {
+      return await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Select folder for books',
+        initialDirectory: initialPath,
+      );
+    }
+    if (choice == 'browse' && mounted) {
+      return await Navigator.of(context).push<String>(
+        MaterialPageRoute(
+          builder: (context) => FileBrowser(
+            initialPath: initialPath,
+            selectDirectory: true,
+            title: 'Select Storage Location',
+          ),
+        ),
+      );
+    }
+    return null;
+  }
+
   Future<void> _pickStorageLocation() async {
     try {
-      // Storage permission only on Android; Windows/Linux can browse folders without it
+      // Storage permission only on Android; Windows/Linux can browse without it
       if (!Platform.isWindows && !Platform.isLinux) {
         final hasPermission = await PermissionHelper.hasStoragePermissions();
         if (!hasPermission) {
@@ -710,9 +760,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               showDialog(
                 context: context,
                 builder: (context) => AlertDialog(
-                  title: const Text('Permission Required'),
+                  title: const Text('Storage Access Required'),
                   content: const Text(
-                    'Storage permission is required to select a folder. Please grant permission in app settings.',
+                    'To select folders on internal or external storage (including USB drives), '
+                    'please grant "All files access" in the next screen.',
                   ),
                   actions: [
                     TextButton(
@@ -722,9 +773,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ElevatedButton(
                       onPressed: () async {
                         Navigator.pop(context);
-                        await PermissionHelper.openAppSettings();
+                        await PermissionHelper.openAllFilesAccessSettings();
                       },
-                      child: const Text('Open Settings'),
+                      child: const Text('Grant Access'),
                     ),
                   ],
                 ),
@@ -735,15 +786,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
 
-      // Use custom file browser for better TV compatibility
-      final String? selectedPath = await Navigator.of(context).push<String>(
-        MaterialPageRoute(
-          builder: (context) => FileBrowser(
-            initialPath: _storageLocation != 'Not selected' ? _storageLocation : null,
-            selectDirectory: true,
-            title: 'Select Storage Location',
-          ),
-        ),
+      final selectedPath = await _selectStoragePath(
+        initialPath: _storageLocation != 'Not selected' ? _storageLocation : null,
       );
 
       if (selectedPath != null && selectedPath.isNotEmpty) {
@@ -754,7 +798,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Storage location selected: ${selectedPath.split('/').last}'),
+              content: Text('Storage location selected: ${path.basename(selectedPath)}'),
               duration: const Duration(seconds: 2),
             ),
           );
@@ -1005,6 +1049,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  if (Platform.isAndroid) ...[
+                    const SizedBox(height: 8),
+                    FutureBuilder<bool>(
+                      future: PermissionHelper.hasStoragePermissions(),
+                      builder: (context, snap) {
+                        if (snap.data == true) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: OutlinedButton.icon(
+                            onPressed: () async {
+                              final ok = await PermissionHelper.requestStoragePermissions();
+                              if (mounted) {
+                                setState(() {});
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                  content: Text(ok ? 'Storage access granted' : 'Please grant access in Settings'),
+                                  duration: const Duration(seconds: 2),
+                                ));
+                              }
+                            },
+                            icon: const Icon(Icons.security),
+                            label: const Text('Grant storage access (internal + external)'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.orange.shade800,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     onPressed: _isLicenseActivated ? _pickStorageLocation : null,

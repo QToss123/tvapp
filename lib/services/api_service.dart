@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
+import 'package:uuid/uuid.dart';
 import 'package:tv_app_books/models/book_download_response.dart';
 import 'package:tv_app_books/utils/device_id_helper.dart';
 
@@ -25,8 +26,14 @@ class ApiService {
       var id = prefs.getString(_kDeviceIdPrefsKey);
       if (id == null || id.isEmpty) {
         id = await DeviceIdHelper.getPlatformDeviceId();
+        // If platform returned a fallback (timestamp-based, changes every run), use persistent UUID
+        if (id.startsWith('fallback_')) {
+          id = 'dev_${const Uuid().v4()}';
+          debugPrint('📱 Device ID (persistent fallback): $id');
+        } else {
+          debugPrint('📱 Device ID (generated): $id');
+        }
         await prefs.setString(_kDeviceIdPrefsKey, id);
-        debugPrint('📱 Device ID (generated): $id');
       } else {
         debugPrint('📱 Device ID (stored): $id');
       }
@@ -553,11 +560,22 @@ class ApiService {
         final String filePath = path.join(coursesDir, fileName);
         final File file = File(filePath);
 
-        debugPrint('📎 CURL (download file): curl -o "$fileName" "$downloadUrl"');
-
+        // Skip download if file already exists at target path (e.g. from previous download)
         if (await file.exists()) {
-          await file.delete();
+          debugPrint('⏭️ Skipping download: file already exists at $filePath');
+          return {
+            'success': true,
+            'filePath': filePath,
+            'message': 'File already exists',
+            'isEncrypted': keys != null,
+            'encBookId': keys?.bookId,
+            'encKeyB64': keys?.keyEncB64,
+            'encNonceB64': keys?.keyNonceB64,
+            'encBookPath': keys?.encBookPath,
+          };
         }
+
+        debugPrint('📎 CURL (download file): curl -o "$fileName" "$downloadUrl"');
 
         // Download file directly (encrypted files remain encrypted)
         debugPrint('Downloading file from URL...');

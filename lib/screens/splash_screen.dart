@@ -90,7 +90,7 @@ class _SplashScreenState extends State<SplashScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: const [
             Text(
-              'Burlington',
+              'BurlingtonEnglish',
               style: TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
             ),
             SizedBox(height: 12),

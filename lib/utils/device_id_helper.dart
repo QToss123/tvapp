@@ -80,6 +80,7 @@ class DeviceIdHelper {
         final output = result.stdout.toString().trim();
         // Format: "","00-11-22-33-44-55",""
         final lines = output.split('\n');
+        final macs = <String>[];
         for (final line in lines) {
           final parts = line.split(',');
           if (parts.length >= 2) {
@@ -88,10 +89,12 @@ class DeviceIdHelper {
                 mac.contains('-') &&
                 mac.length >= 17 &&
                 !mac.startsWith('FF-FF-FF')) {
-              return mac.replaceAll('-', '').toLowerCase();
+              macs.add(mac.replaceAll('-', '').toLowerCase());
             }
           }
         }
+        macs.sort();
+        return macs.isNotEmpty ? macs.first : null;
       }
     } catch (e) {
       debugPrint('Error getting Windows MAC: $e');
