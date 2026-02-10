@@ -39,7 +39,14 @@ class SyncItem {
 }
 
 class SyncScreen extends StatefulWidget {
-  const SyncScreen({super.key});
+  const SyncScreen({
+    super.key,
+    this.showAsPanel = false,
+    this.onClose,
+  });
+
+  final bool showAsPanel;
+  final VoidCallback? onClose;
 
   @override
   State<SyncScreen> createState() => _SyncScreenState();
@@ -90,20 +97,11 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   Future<void> _startSync() async {
-    final prefs = await SharedPreferences.getInstance();
-    final syncType = prefs.getString('syncType') ?? 'online';
-    final storageLocation = prefs.getString('storageLocation');
-
     setState(() {
       _isLoading = true;
       _statusMessage = 'Starting sync process...';
     });
-
-    if (syncType == 'online') {
-      await _fetchAndPrepare();
-    } else {
-      await _syncOffline(storageLocation);
-    }
+    await _fetchAndPrepare();
   }
 
   /// Updates _statusMessage and _downloadedBooks from current _syncItems state.
@@ -426,204 +424,6 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
-  Future<void> _syncOffline(String? storageLocation) async {
-    if (storageLocation == null || storageLocation.isEmpty || storageLocation == 'Not selected') {
-      setState(() {
-        _isLoading = false;
-        _statusMessage = 'Please select a storage location first.';
-      });
-      
-      // Navigate back to settings after a delay
-      await Future.delayed(const Duration(seconds: 2));
-      if (mounted) {
-        Navigator.pop(context);
-      }
-      return;
-    }
-
-    try {
-      // Even for offline sync, we need internet to get the book list from API
-      setState(() {
-        _statusMessage = 'Checking internet connection...';
-      });
-      
-      final hasInternet = await ConnectivityHelper.hasInternetConnection();
-      if (!hasInternet) {
-        setState(() {
-          _isLoading = false;
-          _statusMessage = 'Internet connection required to fetch book list. Books will be scanned from your storage location once the list is retrieved.';
-        });
-        return;
-      }
-
-      setState(() {
-        _statusMessage = 'Fetching book list from server...';
-      });
-
-      // Step 1: Get list of books from API
-      final result = await ApiService.getProductList();
-
-      if (result['success'] != true) {
-        setState(() {
-          _isLoading = false;
-          _statusMessage = 'Failed to fetch book list: ${result['message']}';
-        });
-        return;
-      }
-
-      final products = result['products'] as List<Map<String, dynamic>>;
-      _totalBooks = products.length;
-
-      if (_totalBooks == 0) {
-        // Mark sync as completed even with 0 books
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('syncCompleted', true);
-        
-        setState(() {
-          _isLoading = false;
-          _statusMessage = 'No books found on server.';
-          _syncComplete = true;
-        });
-        return;
-      }
-
-      setState(() {
-        _statusMessage = 'Checking $_totalBooks book(s) in folder...';
-        _downloadedBooks = 0;
-      });
-
-      // Step 2: Check each book in the selected folder
-      int foundCount = 0;
-      
-      for (int i = 0; i < products.length; i++) {
-        final product = products[i];
-        final courseId = product['id'] ?? product['course_id'] ?? i + 1;
-        final title = product['title']?.toString() ?? product['name']?.toString() ?? 'Untitled';
-        final author = product['author']?.toString() ?? product['author_name']?.toString() ?? 'Unknown Author';
-
-        setState(() {
-          _statusMessage = 'Checking: $title (${i + 1}/$_totalBooks)';
-        });
-
-        // Check if book exists in the folder
-        bool bookFound = false;
-        String? bookPath;
-
-        try {
-          // Look for ZIP files with course ID in name
-          final coursesDir = Directory(path.join(storageLocation, 'courses'));
-          if (await coursesDir.exists()) {
-            await for (final entity in coursesDir.list()) {
-              if (entity is File) {
-                final fileName = path.basenameWithoutExtension(entity.path).toLowerCase();
-                if (fileName.contains('course_$courseId') || 
-                    fileName.contains('$courseId')) {
-                  bookPath = entity.path;
-                  bookFound = true;
-                  break;
-                }
-              }
-            }
-          }
-
-          // Also check in books folder
-          if (!bookFound) {
-            final booksDir = Directory(path.join(storageLocation, 'books'));
-            if (await booksDir.exists()) {
-              await for (final entity in booksDir.list()) {
-                if (entity is Directory || entity is File) {
-                  final name = path.basename(entity.path).toLowerCase();
-                  // Check if folder/file name contains course ID or title keywords
-                  if (name.contains('course_$courseId') || 
-                      name.contains('$courseId') ||
-                      name.contains(title.toLowerCase().substring(0, title.length > 10 ? 10 : title.length))) {
-                    // Check for index.html inside
-                    if (entity is Directory) {
-                      final indexHtml = await ZipHandler.findIndexHtml(entity.path);
-                      if (indexHtml != null) {
-                        bookPath = indexHtml;
-                        bookFound = true;
-                        break;
-                      }
-                    } else if (entity.path.toLowerCase().endsWith('.html') ||
-                               entity.path.toLowerCase().endsWith('.zip')) {
-                      bookPath = entity.path;
-                      bookFound = true;
-                      break;
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          // If book found, save to database
-          if (bookFound && bookPath != null) {
-            // Store path as-is (ZIP or folder); extraction happens when user opens book
-            final finalPath = bookPath;
-            final thumb = product['thumbnail']?.toString() ?? product['thumbnail_url']?.toString();
-            String? thumbnailLocalPath;
-            if (thumb != null && thumb.isNotEmpty && thumb.startsWith('http')) {
-              final thumbnailsDir = path.join(storageLocation, 'thumbnails');
-              thumbnailLocalPath = await ThumbnailHelper.downloadAndSave(
-                thumb,
-                thumbnailsDir: thumbnailsDir,
-                id: 'course_$courseId',
-              );
-            }
-
-            // Create book object
-            final book = Book(
-              title: title,
-              author: author,
-              progress: 0,
-              thumbnail: thumb,
-              thumbnailLocalPath: thumbnailLocalPath,
-              contentUrl: finalPath != null && finalPath.startsWith('/')
-                  ? 'file://$finalPath'
-                  : finalPath != null && finalPath.startsWith('file://')
-                      ? finalPath
-                      : 'file:///$finalPath',
-            );
-
-            // Save to database
-            await DatabaseService.insertBook(
-              book,
-              courseId: courseId is int ? courseId : int.tryParse(courseId.toString()),
-              filePath: finalPath,
-            );
-
-            foundCount++;
-          }
-
-          _downloadedBooks++;
-        } catch (e) {
-          debugPrint('Error checking book $title: $e');
-          _downloadedBooks++;
-          // Continue with next book
-        }
-      }
-
-      setState(() {
-        _isLoading = false;
-        _statusMessage = 'Sync complete! Found $foundCount/$_totalBooks books in folder.';
-        _syncComplete = true;
-      });
-
-      // Mark sync as completed in preferences
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('syncCompleted', true);
-
-      // Show completion and wait for user to click "Go to Bookshelf"
-      // Don't auto-navigate, wait for user action
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _statusMessage = 'Error during sync: $e';
-      });
-    }
-  }
-
   void _handleBack() {
     final downloading = _isLoading &&
         _syncItems.any((s) => s.status == 'downloading' || s.status == 'pending');
@@ -635,35 +435,16 @@ class _SyncScreenState extends State<SyncScreen> {
         ),
       );
     }
-    Navigator.maybePop(context);
+    if (widget.showAsPanel) {
+      widget.onClose?.call();
+      if (mounted) Navigator.pop(context);
+    } else {
+      Navigator.maybePop(context);
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop &&
-            _isLoading &&
-            _syncItems.any((s) => s.status == 'downloading' || s.status == 'pending')) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Downloads will continue in background.'),
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
-      },
-      child: Scaffold(
-      appBar: AppBar(
-        title: const Text('Syncing Books', style: TextStyle(fontWeight: FontWeight.w600)),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          tooltip: 'Back',
-          onPressed: _handleBack,
-        ),
-      ),
-      body: Padding(
+  Widget _buildBody(BuildContext context) {
+    return Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -755,8 +536,7 @@ class _SyncScreenState extends State<SyncScreen> {
                               duration: Duration(seconds: 4),
                             ),
                           );
-                          Navigator.pushReplacementNamed(
-                              context, AppRoutes.home);
+                          _closeOrGoToBookshelf();
                         },
                         icon: const Icon(Icons.cloud_download, size: 20),
                         label: const Text('Sync in background', style: TextStyle(fontWeight: FontWeight.w600)),
@@ -785,7 +565,7 @@ class _SyncScreenState extends State<SyncScreen> {
                               const Icon(Icons.check_circle, size: 56, color: Colors.green),
                               const SizedBox(height: 20),
                               ElevatedButton.icon(
-                                onPressed: () => Navigator.pushReplacementNamed(context, AppRoutes.home),
+                                onPressed: _closeOrGoToBookshelf,
                                 icon: const Icon(Icons.library_books),
                                 label: const Text('Go to Bookshelf', style: TextStyle(fontWeight: FontWeight.w600)),
                                 style: ElevatedButton.styleFrom(
@@ -833,7 +613,7 @@ class _SyncScreenState extends State<SyncScreen> {
               Focus(
                 autofocus: true,
                 child: ElevatedButton.icon(
-                  onPressed: () => Navigator.pushReplacementNamed(context, AppRoutes.home),
+                  onPressed: _closeOrGoToBookshelf,
                   icon: const Icon(Icons.library_books),
                   label: const Text('Go to Bookshelf', style: TextStyle(fontWeight: FontWeight.w600)),
                   style: ElevatedButton.styleFrom(
@@ -845,8 +625,78 @@ class _SyncScreenState extends State<SyncScreen> {
             ],
           ],
         ),
+      );
+  }
+
+  void _closeOrGoToBookshelf() {
+    if (widget.showAsPanel) {
+      widget.onClose?.call();
+      if (mounted) Navigator.pop(context);
+    } else {
+      Navigator.pushReplacementNamed(context, AppRoutes.home);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final body = _buildBody(context);
+    if (widget.showAsPanel) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: Theme.of(context).appBarTheme.backgroundColor ?? Theme.of(context).colorScheme.surface,
+            child: SafeArea(
+              bottom: false,
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    tooltip: 'Close',
+                    onPressed: _handleBack,
+                  ),
+                  const Expanded(
+                    child: Text(
+                      'Download books',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(width: 48),
+                ],
+              ),
+            ),
+          ),
+          Expanded(child: body),
+        ],
+      );
+    }
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop &&
+            _isLoading &&
+            _syncItems.any((s) => s.status == 'downloading' || s.status == 'pending')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Downloads will continue in background.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Syncing Books', style: TextStyle(fontWeight: FontWeight.w600)),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: 'Back',
+            onPressed: _handleBack,
+          ),
+        ),
+        body: body,
       ),
-    ),
     );
   }
 }
@@ -996,7 +846,7 @@ class _SyncItemGridTile extends StatelessWidget {
                       ),
                       color: Colors.white,
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Expanded(
@@ -1010,6 +860,7 @@ class _SyncItemGridTile extends StatelessWidget {
                               ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
                             ),
                           ),
                           SizedBox(height: _px(context, 2)),

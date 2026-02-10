@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/book.dart';
 import '../routes.dart';
+import '../screens/sync_screen.dart';
 import '../widgets/book_card.dart';
 import '../services/api_service.dart';
 import '../services/database_service.dart';
@@ -471,7 +472,9 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     } else {
-      statusMessage = null; // Default message for no license
+      statusMessage = licenseNumber.isEmpty
+          ? 'Please activate your license in Settings.'
+          : null;
       debugPrint('⚠️ [HOME] License not activated: licenseNumber="${licenseNumber.isEmpty ? "EMPTY" : licenseNumber}", isActivated=$isActivated');
     }
     
@@ -500,6 +503,33 @@ class _HomeScreenState extends State<HomeScreen> {
     debugPrint('🚀 [HOME] ========== INIT COMPLETE ==========');
   }
 
+  bool _canSync() {
+    return _isLicenseActivated &&
+        _storageLocation != null &&
+        _storageLocation!.isNotEmpty &&
+        _storageLocation != 'Not selected';
+  }
+
+  Future<void> _openDownloadPanel() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => SizedBox(
+        height: MediaQuery.of(ctx).size.height * 0.9,
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+          child: Scaffold(
+            body: SyncScreen(
+              showAsPanel: true,
+              onClose: () => Navigator.pop(ctx),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -519,6 +549,11 @@ class _HomeScreenState extends State<HomeScreen> {
         appBar: AppBar(
           title: const Text('Bookshelf'),
           actions: [
+            IconButton(
+              tooltip: 'Activate license and select storage in Settings',
+              icon: const Icon(Icons.download, color: Colors.grey),
+              onPressed: null,
+            ),
             IconButton(
               tooltip: _hasInternet ? 'Settings' : 'Internet connection required',
               icon: Icon(Icons.settings, color: _hasInternet ? null : Colors.grey),
@@ -670,6 +705,21 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Bookshelf'),
         actions: [
           IconButton(
+            tooltip: _canSync()
+                ? 'Download books'
+                : 'Activate license and select storage in Settings',
+            icon: Icon(
+              Icons.download,
+              color: _canSync() ? null : Colors.grey,
+            ),
+            onPressed: _canSync()
+                ? () async {
+                    await _openDownloadPanel();
+                    if (mounted) await _loadBooks();
+                  }
+                : null,
+          ),
+          IconButton(
             tooltip: _hasInternet ? 'Settings' : 'Internet connection required',
             icon: Icon(Icons.settings, color: _hasInternet ? null : Colors.grey),
             onPressed: _hasInternet
@@ -756,11 +806,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         )
                       : GridView.builder(
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 10,
                         crossAxisSpacing: 8,
                         mainAxisSpacing: 8,
-                        childAspectRatio: 0.5,
+                        childAspectRatio: MediaQuery.sizeOf(context).width >= 600 ? 0.62 : 0.5,
                       ),
                       itemCount: filtered.length,
                       itemBuilder: (_, i) => BookCard(book: filtered[i]),

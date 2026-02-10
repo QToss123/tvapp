@@ -17,6 +17,12 @@ class BookCard extends StatefulWidget {
 class _BookCardState extends State<BookCard> {
   bool _isHovered = false;
 
+  static bool _isTv(BuildContext context) => MediaQuery.sizeOf(context).width >= 600;
+  static double _fs(BuildContext context, double base) =>
+      _isTv(context) ? base * 1.1 : base;
+  static double _px(BuildContext context, double base) =>
+      _isTv(context) ? base * 1.1 : base;
+
   @override
   Widget build(BuildContext context) {
     return Focus(
@@ -28,111 +34,116 @@ class _BookCardState extends State<BookCard> {
             onEnter: (_) => setState(() => _isHovered = true),
             onExit: (_) => setState(() => _isHovered = false),
             cursor: SystemMouseCursors.click,
-            child: AnimatedScale(
-              scale: isHighlighted ? 1.05 : 1.0,
+            child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              child: InkWell(
-                onTap: () {
-                  Navigator.pushNamed(
-                    context,
-                    AppRoutes.reading,
-                    arguments: widget.book,
-                  );
-                },
+              decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
-                child: Card(
-                  elevation: isHighlighted ? 12 : 3,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    side: isHighlighted
-                        ? const BorderSide(color: Colors.blueAccent, width: 4)
-                        : BorderSide.none,
-                  ),
+                border: isHighlighted
+                    ? Border.all(color: Colors.blueAccent, width: 2)
+                    : null,
+                boxShadow: isHighlighted
+                    ? [
+                        BoxShadow(
+                          color: Colors.blueAccent.withOpacity(0.3),
+                          blurRadius: 6,
+                          spreadRadius: 0,
+                        )
+                      ]
+                    : null,
+              ),
+              child: Card(
+                clipBehavior: Clip.antiAlias,
+                elevation: isHighlighted ? 8 : 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                color: Colors.grey.shade50,
+                child: InkWell(
+                  onTap: () {
+                    Navigator.pushNamed(
+                      context,
+                      AppRoutes.reading,
+                      arguments: widget.book,
+                    );
+                  },
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Thumbnail with title overlay
-                      Stack(
-                        children: [
-                          ClipRRect(
-                            borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
-                            child: AspectRatio(
-                              aspectRatio: 2 / 3,
+                      // Thumbnail (same as sync screen)
+                      Expanded(
+                        flex: 3,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ClipRect(
                               child: _buildThumbnail(),
                             ),
-                          ),
-                          // Gradient overlay at bottom for title readability
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  height: 50,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        Colors.black.withOpacity(0.8),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              // Title overlay on thumbnail
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                  child: Text(
-                    widget.book.title,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                      height: 1.2,
-                      shadows: [
-                        Shadow(
-                          offset: Offset(0, 1),
-                          blurRadius: 2,
-                          color: Colors.black87,
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              child: Container(
+                                height: _px(context, 20),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.transparent,
+                                      Colors.black.withOpacity(0.6),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          // Author section with better contrast
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade50,
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(8),
-              ),
-            ),
-            child: Text(
-              widget.book.author,
-              style: TextStyle(
-                fontSize: 10,
-                color: Colors.grey.shade800,
-                fontWeight: FontWeight.w500,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ],
+                      ),
+                      // Title and progress section (same layout as sync screen)
+                      Expanded(
+                        flex: 2,
+                        child: Container(
+                          width: double.infinity,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: _px(context, 4),
+                            vertical: _px(context, 3),
+                          ),
+                          color: Colors.white,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  widget.book.title,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: _fs(context, 11),
+                                    color: Colors.grey.shade900,
+                                    height: 1.2,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                              Text(
+                                widget.book.author,
+                                style: TextStyle(
+                                  fontSize: _fs(context, 10),
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade700,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -143,7 +154,6 @@ class _BookCardState extends State<BookCard> {
     );
   }
 
-  /// Prefers local thumbnail for offline; falls back to network.
   Widget _buildThumbnail() {
     final localPath = widget.book.thumbnailLocalPath;
     if (localPath != null && localPath.isNotEmpty) {

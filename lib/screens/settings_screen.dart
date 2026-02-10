@@ -39,8 +39,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _storageLocation = 'Not selected';
   bool _tvCursorEnabled = true;
 
-  final List<String> _syncTypes = ['online'];
-
   @override
   void initState() {
     super.initState();
@@ -59,7 +57,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     final tvCursor = prefs.getBool(_kTVCursorEnabled) ?? Platform.isAndroid;
     setState(() {
-      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'SPO-CL148-S71-O1MGB7PY3H';
+      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'TES-CL159-S73-IYSFKUUJCL';
       _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
       _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';
@@ -301,20 +299,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // No need for dialog - settings are visible on the same screen
         }
       } else {
-        // License activation failed - do NOT mark as activated for "already used" errors
+        // License activation failed - show friendly message by error type
         final errorMessage = (activateResult['message'] ?? 'License activation failed').toString().toLowerCase();
-        final isBlockedError = errorMessage.contains('already used') ||
+        final isDeletedOrNotFound = errorMessage.contains('deleted') || errorMessage.contains('not found');
+        final isAlreadyUsed = errorMessage.contains('already used') ||
             errorMessage.contains('already activated') ||
-            errorMessage.contains('device limit') ||
-            errorMessage.contains('deleted') ||
-            errorMessage.contains('not found');
+            errorMessage.contains('device limit');
         
-        if (isBlockedError) {
-          // Block: do NOT activate - used license cannot be reused after reset
+        if (isDeletedOrNotFound) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('This license has already been used. Reset does not allow reusing the same license on this device.'),
+                content: Text('License key not found or has been deleted. Please contact support.'),
+                duration: Duration(seconds: 4),
+                backgroundColor: Colors.red,
+              ),
+            );
+            setState(() {
+              _isLicenseActivated = false;
+            });
+          }
+        } else if (isAlreadyUsed) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('This license has already been used on this device.'),
                 duration: Duration(seconds: 4),
                 backgroundColor: Colors.red,
               ),
@@ -351,9 +360,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            duration: const Duration(seconds: 4),
+          const SnackBar(
+            content: Text('Something went wrong. Please try again.'),
+            duration: Duration(seconds: 4),
             backgroundColor: Colors.red,
           ),
         );
@@ -367,18 +376,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please activate your license first before saving settings.'),
-          duration: Duration(seconds: 3),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    // Validate sync type is selected
-    if (_syncType.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select a sync type (online or offline).'),
           duration: Duration(seconds: 3),
           backgroundColor: Colors.red,
         ),
@@ -439,7 +436,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (hasStorage) ...[
                 const SizedBox(height: 8),
                 Text(
-                  '• All downloaded books from:\n$storageLocation',
+                  '• All downloaded books and thumbnails from:\n$storageLocation',
                   style: TextStyle(
                     fontSize: 13,
                     color: Colors.grey.shade700,
@@ -487,6 +484,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (await booksDir.exists()) {
           await booksDir.delete(recursive: true);
           debugPrint('✅ Deleted books folder: ${booksDir.path}');
+        }
+        final thumbnailsDir = Directory(path.join(storageLocation, 'thumbnails'));
+        if (await thumbnailsDir.exists()) {
+          await thumbnailsDir.delete(recursive: true);
+          debugPrint('✅ Deleted thumbnails folder: ${thumbnailsDir.path}');
         }
       } catch (e) {
         debugPrint('⚠️ Error deleting books from storage: $e');
@@ -645,11 +647,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   /// Shows configuration dialog after license activation
-  /// Asks user to select sync type and storage location
+  /// Asks user to select storage location (sync is always online)
   Future<void> _showConfigurationDialog() async {
-    String? selectedSyncType = _syncType;
     String? selectedLocation = _storageLocation != 'Not selected' ? _storageLocation : null;
-    bool isConfigComplete = false;
 
     await showDialog(
       context: context,
@@ -665,37 +665,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Please configure your sync settings:',
+                      'Please select a storage location for your books:',
                       style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 20),
-                    
-                    // Sync Type Selection
-                    const Text(
-                      'Select Sync Type:',
-                      style: TextStyle(fontWeight: FontWeight.w500),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      value: selectedSyncType,
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.sync),
-                      ),
-                      items: _syncTypes.map((String type) {
-                        return DropdownMenuItem<String>(
-                          value: type,
-                          child: const Text('Online'),
-                        );
-                      }).toList(),
-                      onChanged: (String? value) {
-                        setDialogState(() {
-                          selectedSyncType = value;
-                          _checkConfigComplete(selectedSyncType, selectedLocation, (complete) {
-                            isConfigComplete = complete;
-                          });
-                        });
-                      },
                     ),
                     const SizedBox(height: 20),
                     
@@ -711,11 +682,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           initialPath: selectedLocation,
                         );
                         if (location != null) {
-                          setDialogState(() {
+                        setDialogState(() {
                             selectedLocation = location;
-                            _checkConfigComplete(selectedSyncType, selectedLocation, (complete) {
-                              isConfigComplete = complete;
-                            });
                           });
                         }
                       },
@@ -741,25 +709,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               actions: [
-                // Remove Cancel button - user must complete configuration
-                // TextButton(
-                //   onPressed: () {
-                //     Navigator.of(context).pop();
-                //   },
-                //   child: const Text('Cancel'),
-                // ),
                 ElevatedButton(
-                  onPressed: (selectedSyncType != null && 
-                              selectedLocation != null && 
-                              selectedLocation!.isNotEmpty)
+                  onPressed: (selectedLocation != null && (selectedLocation?.isNotEmpty ?? false))
                       ? () {
                           setState(() {
-                            _syncType = selectedSyncType!;
+                            _syncType = 'online';
                             _storageLocation = selectedLocation!;
                           });
                           Navigator.of(context).pop();
-                          
-                          // Save settings and proceed to sync
                           _saveAndProceedToSync();
                         }
                       : null,
@@ -773,10 +730,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _checkConfigComplete(String? syncType, String? location, Function(bool) callback) {
-    callback(syncType != null && 
-             location != null && 
-             location.isNotEmpty && 
+  void _checkConfigComplete(String? location, Function(bool) callback) {
+    callback(location != null &&
+             location.isNotEmpty &&
              location != 'Not selected');
   }
 
@@ -1067,62 +1023,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   if (_isLicenseActivated) ...[
                     const SizedBox(height: 8),
                   ],
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Sync Type Section
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Sync Type',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_isLicenseActivated && _storageLocation != 'Not selected') ...[
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.pushNamed(context, AppRoutes.sync);
-                      },
-                      icon: const Icon(Icons.cloud_download),
-                      label: const Text('Go to Sync / Download Books'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        minimumSize: const Size(double.infinity, 48),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  DropdownButtonFormField<String>(
-                    value: _syncType,
-                    decoration: const InputDecoration(
-                      labelText: 'Select sync type',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.sync),
-                    ),
-                    items: _syncTypes.map((String type) {
-                      return DropdownMenuItem<String>(
-                        value: type,
-                        child: Text(type),
-                      );
-                    }).toList(),
-                    onChanged: _isLicenseActivated
-                        ? (String? value) {
-                            if (value != null) {
-                              setState(() => _syncType = value);
-                            }
-                          }
-                        : null,
-                  ),
                 ],
               ),
             ),

@@ -346,8 +346,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
               if (mounted) {
                 setState(() {
                   _isLoading = false;
-                  _error = 'The book page couldn’t be loaded.\n\n'
-                      'Please try again or open a different book.';
+                  _error = 'This file could not be opened.';
                 });
               }
             } else {
@@ -389,8 +388,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
       _controller.loadRequest(Uri.parse('about:blank'));
       setState(() {
         _isLoading = false;
-        _error = 'This book isn’t ready to open yet.\n\n'
-            'Go to Sync to download it first, then try again.';
+        _error = 'Not ready. Go to Sync to download first.';
       });
     }
   }
@@ -490,8 +488,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
       debugPrint('Failed to load asset: $e');
       setState(() {
         _isLoading = false;
-        _error = 'This book couldn’t be loaded.\n\n'
-            'Please try closing and reopening the app, or open a different book.';
+        _error = 'This file could not be opened.';
       });
     }
   }
@@ -519,110 +516,77 @@ class _ReadingScreenState extends State<ReadingScreen> {
   /// Cleans up the copied folder when done
   Future<void> _loadFile(String fileUrl) async {
     bool dialogOpen = false;
+    bool errorShownInDialog = false;
+    String? dialogError;
+    StateSetter? dialogSetState;
+    Future<void> updateDialog({
+      required String stepKey,
+      required String message,
+      String? error,
+    }) async {
+      dialogError = error;
+      if (!mounted) return;
+      if (!dialogOpen) {
+        dialogOpen = true;
+        // ignore: use_build_context_synchronously
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) {
+            final navigator = Navigator.of(dialogContext);
+            return StatefulBuilder(
+              builder: (context, setState) {
+                dialogSetState = setState;
+                return AlertDialog(
+                  title: const Text('Opening book'),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'Opening the book, Please wait.',
+                        style: TextStyle(fontSize: 16),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 20),
+                      const LinearProgressIndicator(minHeight: 4),
+                      if (dialogError != null) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          dialogError!,
+                          style: const TextStyle(color: Colors.red, fontSize: 14),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ],
+                  ),
+                  actions: dialogError != null
+                      ? [
+                          TextButton(
+                            onPressed: () {
+                              Navigator.pop(dialogContext);
+                              navigator.pop();
+                            },
+                            child: const Text('Close'),
+                          ),
+                        ]
+                      : const [],
+                );
+              },
+            );
+          },
+        );
+      } else {
+        if (dialogSetState != null) {
+          dialogSetState!(() {});
+        }
+      }
+    }
+
     try {
       await _loadTvCursorSetting();
       debugPrint('📂 [READING] Loading file from external storage: $fileUrl');
 
-      // Step-wise dialog (decrypt -> unzip -> open)
-      const dialogSteps = <String>[
-        'Checking file',
-        'Decrypting',
-        'Unzipping',
-        'Starting reader',
-      ];
-      String dialogMessage = 'Preparing...';
-      String? dialogError;
-      int currentStepIndex = 0;
-      StateSetter? dialogSetState;
-      Future<void> updateDialog({
-        required String stepKey,
-        required String message,
-        String? error,
-      }) async {
-        dialogMessage = message;
-        dialogError = error;
-        final idx = dialogSteps.indexWhere(
-          (s) => s.toLowerCase().startsWith(stepKey.toLowerCase()),
-        );
-        if (idx >= 0) {
-          currentStepIndex = idx;
-        }
-        if (!mounted) return;
-        if (!dialogOpen) {
-          dialogOpen = true;
-          // ignore: use_build_context_synchronously
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (context) {
-              return StatefulBuilder(
-                builder: (context, setState) {
-                  dialogSetState = setState;
-                  return AlertDialog(
-                    title: const Text('Opening book'),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          dialogMessage,
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        const SizedBox(height: 12),
-                        const LinearProgressIndicator(minHeight: 4),
-                        const SizedBox(height: 12),
-                        for (var i = 0; i < dialogSteps.length; i++)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  i < currentStepIndex
-                                      ? Icons.check_circle
-                                      : i == currentStepIndex
-                                          ? Icons.radio_button_checked
-                                          : Icons.radio_button_unchecked,
-                                  size: 18,
-                                  color: i < currentStepIndex
-                                      ? Colors.green
-                                      : i == currentStepIndex
-                                          ? Colors.blue
-                                          : Colors.grey,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(dialogSteps[i]),
-                              ],
-                            ),
-                          ),
-                        if (dialogError != null) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            dialogError!,
-                            style: const TextStyle(color: Colors.red),
-                          ),
-                        ],
-                      ],
-                    ),
-                    actions: dialogError != null
-                        ? [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('Close'),
-                            ),
-                          ]
-                        : const [],
-                  );
-                },
-              );
-            },
-          );
-        } else {
-          if (dialogSetState != null) {
-            dialogSetState!(() {});
-          }
-        }
-      }
-      
       // Parse file:// URL to native path (Windows: /D:/path -> D:\path)
       var filePath = _fileUrlToPath(fileUrl);
       var file = File(filePath);
@@ -640,10 +604,10 @@ class _ReadingScreenState extends State<ReadingScreen> {
       if (!fileExists) {
         await updateDialog(
           stepKey: 'Checking file',
-          message: 'File not found',
-          error: 'This file is missing or was moved. Try downloading the book again from Sync.',
+          message: '',
+          error: 'File not found.',
         );
-        throw Exception('File not found: $filePath');
+        return;
       }
 
       // Always load encryption keys from local DB (book-wise) if available
@@ -701,23 +665,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
           debugPrint('❌ [READING] Decryption failed: $e\n$st');
           await updateDialog(
             stepKey: 'Decrypting',
-            message: 'Decryption failed',
-            error: 'This file doesn’t match this book. Try downloading the book again from Sync.',
+            message: '',
+            error: 'Incorrect format.',
           );
-          if (mounted) {
-            if (dialogOpen && Navigator.canPop(context)) {
-              Navigator.pop(context);
-              dialogOpen = false;
-            }
-            setState(() {
-              _isLoading = false;
-              _error = 'This book couldn’t be opened.\n\n'
-                  'The file doesn’t match this book (it may have been copied from somewhere else or the book was re-downloaded with a new key).\n\n'
-                  'What to do:\n'
-                  '• Go to Sync and download this book again, or\n'
-                  '• Open it from the same folder where you first downloaded it.';
-            });
-          }
           return;
         }
       }
@@ -729,13 +679,13 @@ class _ReadingScreenState extends State<ReadingScreen> {
       try {
         processed = await ZipHandler.processBookFile(filePath);
         filePath = processed.path;
-      } on FormatException catch (e) {
+      } on FormatException catch (_) {
         await updateDialog(
           stepKey: 'Unzipping',
-          message: 'Unzip failed',
-          error: 'This file can’t be opened as a book. Try downloading the book again from Sync.',
+          message: '',
+          error: 'Incorrect format.',
         );
-        rethrow;
+        return;
       }
       
       if (processed.wasExtracted) {
@@ -821,8 +771,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
             if (mounted) {
               setState(() {
                 _isLoading = false;
-                _error = 'The reader couldn’t open this book.\n\n'
-                    'Please try again or open a different book.';
+                _error = 'This file could not be opened.';
               });
             }
           }
@@ -832,41 +781,26 @@ class _ReadingScreenState extends State<ReadingScreen> {
       debugPrint('❌ [READING] Failed to load file: $e\n$st');
       await _stopLocalServer();
       if (mounted) {
-        if (dialogOpen && Navigator.canPop(context)) {
-          Navigator.pop(context);
-          dialogOpen = false;
-        }
         final errorStr = e.toString().toLowerCase();
-        final isFormatError = errorStr.contains('format') ||
+        final isFormatOrDecrypt = errorStr.contains('format') ||
             errorStr.contains('invalid zip') ||
             errorStr.contains('corrupt') ||
-            errorStr.contains('decryption failed');
-        final isDecryptKeyError = errorStr.contains('secretbox') ||
-            errorStr.contains('message authentication code') ||
-            errorStr.contains('secretboxauthenticationerror') ||
-            errorStr.contains('wrong mac');
-        setState(() {
-          _isLoading = false;
-          if (isDecryptKeyError) {
-            _error = 'This book couldn’t be opened.\n\n'
-                'The file doesn’t match this book (it may have been copied from somewhere else or the book was re-downloaded with a new key).\n\n'
-                'What to do:\n'
-                '• Go to Sync and download this book again, or\n'
-                '• Open it from the same folder where you first downloaded it.';
-          } else if (isFormatError) {
-            _error = 'This file can’t be opened as a book.\n\n'
-                'Please check that it’s the correct file and try again.';
-          } else {
-            _error = 'This book couldn’t be opened.\n\n'
-                'Please check that:\n'
-                '• The file is still in the same folder\n'
-                '• The app has permission to read that folder\n\n'
-                'If you moved or copied the file, try opening it from Sync after downloading again.';
-          }
-        });
+            errorStr.contains('decryption') ||
+            errorStr.contains('secretbox') ||
+            errorStr.contains('authentication') ||
+            errorStr.contains('wrong mac') ||
+            errorStr.contains('index.html');
+        final String friendlyMessage =
+            isFormatOrDecrypt ? 'Incorrect format.' : 'This file could not be opened.';
+        await updateDialog(
+          stepKey: 'Checking file',
+          message: '',
+          error: friendlyMessage,
+        );
+        errorShownInDialog = true;
       }
     } finally {
-      if (mounted && dialogOpen && Navigator.canPop(context)) {
+      if (mounted && !errorShownInDialog && dialogOpen && Navigator.canPop(context)) {
         Navigator.pop(context);
       }
     }
