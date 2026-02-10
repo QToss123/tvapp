@@ -74,6 +74,11 @@ kotlin {
     jvmToolchain(17)
 }
 
+// Suppress "source value 8 / target value 8 is obsolete" warnings from dependencies
+tasks.withType<JavaCompile>().configureEach {
+    options.compilerArgs.add("-Xlint:-options")
+}
+
 flutter {
     source = "../.."
 }

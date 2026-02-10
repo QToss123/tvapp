@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/book.dart';
 import '../routes.dart';
-import '../screens/sync_screen.dart';
 import '../widgets/book_card.dart';
 import '../services/api_service.dart';
 import '../services/database_service.dart';
@@ -511,23 +510,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openDownloadPanel() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => SizedBox(
-        height: MediaQuery.of(ctx).size.height * 0.9,
-        child: ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-          child: Scaffold(
-            body: SyncScreen(
-              showAsPanel: true,
-              onClose: () => Navigator.pop(ctx),
-            ),
-          ),
-        ),
-      ),
-    );
+    if (!mounted) return;
+    await Navigator.pushNamed(context, AppRoutes.sync);
   }
 
   @override

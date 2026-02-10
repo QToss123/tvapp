@@ -1006,7 +1006,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: ElevatedButton.icon(
                             onPressed: _activateLicense,
                             icon: const Icon(Icons.verified),
-                            label: const Text('Activate'),
+                            label: const Text('Add Licence'),
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 20,

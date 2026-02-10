@@ -125,11 +125,13 @@ class _SyncScreenState extends State<SyncScreen> {
     if (_storageLocationForSync == null) return;
     final selectedItems = _syncItems.where((s) => s.selected).toList();
     if (selectedItems.isEmpty) {
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Please select at least one course to download.';
       });
       return;
     }
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _statusMessage = 'Downloading ${selectedItems.length} book(s)...';
@@ -147,6 +149,7 @@ class _SyncScreenState extends State<SyncScreen> {
     final paused = _syncItems.where((s) => s.status == 'paused').length;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('syncCompleted', true);
+    if (!mounted) return;
     setState(() {
       _isLoading = false;
       _downloadedBooks = done;
@@ -164,6 +167,7 @@ class _SyncScreenState extends State<SyncScreen> {
       final storageLocation = prefs.getString('storageLocation');
       
       if (storageLocation == null || storageLocation.isEmpty || storageLocation == 'Not selected') {
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
           _statusMessage = 'Storage location not configured. Please select a storage location in Settings.';
@@ -172,12 +176,14 @@ class _SyncScreenState extends State<SyncScreen> {
       }
 
       // Check internet connectivity before starting online sync
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Checking internet connection...';
       });
       
       final hasInternet = await ConnectivityHelper.hasInternetConnection();
       if (!hasInternet) {
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
           _statusMessage = 'Internet connection required for online sync. Please check your network connection and try again.';
@@ -185,6 +191,7 @@ class _SyncScreenState extends State<SyncScreen> {
         return;
       }
 
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Fetching books from server...';
       });
@@ -193,6 +200,7 @@ class _SyncScreenState extends State<SyncScreen> {
       final result = await ApiService.getProductList();
 
       if (result['success'] != true) {
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
           _statusMessage = 'Failed to fetch books: ${result['message']}';
@@ -238,6 +246,7 @@ class _SyncScreenState extends State<SyncScreen> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('syncCompleted', true);
         
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
           _statusMessage = 'No books found on server.';
@@ -247,6 +256,7 @@ class _SyncScreenState extends State<SyncScreen> {
       }
 
       // Save all courses to database first
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Saving $_totalBooks book(s) to database...';
       });
@@ -297,6 +307,7 @@ class _SyncScreenState extends State<SyncScreen> {
 
       _storageLocationForSync = storageLocation;
       _allCoursesForSync = List<Map<String, dynamic>>.from(allCourses);
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Downloading $_totalBooks book(s)...';
         _downloadedBooks = 0;
@@ -309,10 +320,12 @@ class _SyncScreenState extends State<SyncScreen> {
       debugPrint('📥 Starting downloads for ${items.length} book(s)...');
       await _runDownloadsNow();
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _statusMessage = 'Error during sync: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _statusMessage = 'Error during sync: $e';
+        });
+      }
     }
   }
 
@@ -589,12 +602,14 @@ class _SyncScreenState extends State<SyncScreen> {
                             return _SyncItemGridTile(
                               item: item,
                               onSelectChanged: (selected) {
+                                if (!mounted) return;
                                 setState(() {
                                   item.selected = selected;
                                 });
                               },
                               onPause: item.status == 'downloading'
                                   ? () {
+                                      if (!mounted) return;
                                       setState(() {
                                         item.isPaused = true;
                                       });
