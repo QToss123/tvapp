@@ -1,4 +1,80 @@
-# Building the Windows installer
+# Building installers and release APK
+
+## Android release APK
+
+Build a release APK for Android / Android TV.
+
+### Prerequisites
+
+1. **Flutter** – [Get Flutter](https://docs.flutter.dev/get-started/install)
+2. **Android SDK** – Install via [Android Studio](https://developer.android.com/studio) or command-line tools
+3. **Environment**
+   - Run as your **normal user** (not root). Root can cause Gradle cache/permission issues.
+   - If Flutter is installed via Homebrew, fix SDK permissions once:
+     ```bash
+     sudo chown -R $(whoami):staff /opt/homebrew/share/flutter/packages/flutter_tools/gradle
+     ```
+   - Ensure enough **free disk space** (several GB for Gradle caches and build output).
+
+### Build the release APK
+
+From the project root:
+
+**macOS / Linux:**
+```bash
+./scripts/build_apk.sh
+```
+
+**Or manually:**
+```bash
+flutter pub get
+flutter build apk --release
+```
+
+**Output:** `build/app/outputs/flutter-apk/app-release.apk`
+
+### Signed release APK (generate signed APK)
+
+**Option A – Create keystore and build (recommended)**
+
+1. Create a new keystore and `android/key.properties` (you will be prompted for passwords):
+   ```bash
+   ./scripts/create_keystore.sh
+   ```
+2. Build the signed release APK:
+   ```bash
+   flutter build apk --release
+   ```
+   Or: `./scripts/build_apk.sh`
+
+**Option B – Use an existing keystore**
+
+1. Put your `.jks` or `.keystore` file in `android/` (e.g. `android/upload-keystore.jks`).
+2. Create `android/key.properties` with **relative** path so it works on any machine:
+   ```properties
+   storePassword=your_store_password
+   keyPassword=your_key_password
+   keyAlias=upload
+   storeFile=upload-keystore.jks
+   ```
+3. Run `flutter build apk --release` (or `./scripts/build_apk.sh`).
+
+**Output:** `build/app/outputs/flutter-apk/app-release.apk` (signed with your key).
+
+If `key.properties` is missing or `storeFile` does not exist, the release build uses the **debug** keystore (fine for sideloading, not for Play Store).
+
+### Release build: storage not loading / file missing
+
+If in **release** the storage list doesn’t load or you see “file missing” when opening books:
+
+- **Minification is disabled** in `android/app/build.gradle.kts` for the release build (`isMinifyEnabled = false`, `isShrinkResources = false`) so SharedPreferences, path_provider, and file I/O are not stripped.
+- **ProGuard rules** in `android/app/proguard-rules.pro` keep Flutter, SharedPreferences, and path_provider classes if you turn minification back on later.
+
+Rebuild the release APK after these changes. If problems persist, ensure the device has storage permission (“All files access” on Android 11+) and that the chosen storage path exists.
+
+---
+
+## Windows installer
 
 This project supports two Windows installer formats:
 

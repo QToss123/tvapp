@@ -1,7 +1,8 @@
 import 'dart:io' show Platform;
+import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, FlutterError, FlutterErrorDetails;
 import 'package:cryptography/cryptography.dart';
 import 'package:cryptography_flutter/cryptography_flutter.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -13,39 +14,41 @@ import 'services/background_sync_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize sqflite FFI for Windows/Linux (required before any openDatabase call)
+  // Prevent uncaught errors from crashing the app
+  FlutterError.onError = (FlutterErrorDetails details) {
+    debugPrint('FlutterError: ${details.exception}\n${details.stack}');
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    debugPrint('Uncaught error: $error\n$stack');
+    return true; // we handled it, don't crash
+  };
+
+  // Launch UI immediately so the app shows and keeps device connection (avoids "Lost connection" on Android TV / emulator)
+  runApp(const MyApp());
+  _deferredInit();
+}
+
+void _deferredInit() {
   if (Platform.isWindows || Platform.isLinux) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
-    debugPrint('📂 [MAIN] sqflite FFI initialized for desktop');
-  }
-
-  // Register WebView platform for Windows/Linux (required before using WebViewWidget)
-  if (Platform.isWindows || Platform.isLinux) {
+    debugPrint('[MAIN] sqflite FFI initialized for desktop');
     WindowsWebViewPlatform.registerWith();
-    debugPrint('🌐 [MAIN] WebView platform set for desktop');
+    debugPrint('[MAIN] WebView platform set for desktop');
   }
-
-  if (FlutterCryptography.isPluginPresent) {
-    Cryptography.instance = FlutterCryptography.defaultInstance;
-    debugPrint('🔐 [MAIN] Using native AES-GCM (cryptography_flutter)');
-  }
-  debugPrint('');
-  debugPrint('🚀 [MAIN] ========== APP STARTING ==========');
-  debugPrint('🚀 [MAIN] main() function called');
-  debugPrint('🚀 [MAIN] WidgetsFlutterBinding initialized');
-  ApiService.getDeviceId().then((id) {
-    debugPrint('📱 [MAIN] Device ID: $id');
-  });
-  if (Platform.isAndroid) {
-    try {
-      await initWorkManager();
-      debugPrint('🚀 [MAIN] WorkManager initialized');
-    } catch (e) {
-      debugPrint('⚠️ [MAIN] WorkManager init failed: $e');
+  try {
+    if (FlutterCryptography.isPluginPresent) {
+      Cryptography.instance = FlutterCryptography.defaultInstance;
+      debugPrint('[MAIN] Using native AES-GCM (cryptography_flutter)');
     }
+  } catch (e) {
+    debugPrint('[MAIN] Cryptography plugin not used: $e');
   }
-  // Full screen mode on launch (Android: immersive; Windows/Linux: edge-to-edge when supported)
+  ApiService.getDeviceId().then((id) => debugPrint('[MAIN] Device ID: $id')).catchError((e) => debugPrint('[MAIN] Device ID failed: $e'));
+  if (Platform.isAndroid) {
+    initWorkManager().then((_) => debugPrint('[MAIN] WorkManager initialized')).catchError((e) => debugPrint('[MAIN] WorkManager init failed: $e'));
+  }
   try {
     if (Platform.isAndroid) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -53,9 +56,6 @@ void main() async {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
   } catch (e) {
-    debugPrint('⚠️ [MAIN] Full screen mode not supported: $e');
+    debugPrint('[MAIN] Full screen mode not supported: $e');
   }
-  debugPrint('🚀 [MAIN] Running MyApp...');
-  debugPrint('');
-  runApp(const MyApp());
 }

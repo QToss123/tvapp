@@ -1,5 +1,42 @@
 # Android TV Crash Fixes
 
+## Build: Flutter SDK Permission (Homebrew)
+
+**Problem:** `Gradle task assembleDebug failed` with:
+```text
+FileNotFoundException: .../flutter_tools/gradle/.gradle/buildOutputCleanup/buildOutputCleanup.lock (Permission denied)
+```
+
+**Cause:** Flutter installed via Homebrew (`/opt/homebrew/share/flutter`) is owned by root. Gradle needs to write into the Flutter plugin’s `.gradle` directory when building.
+
+**Fix (run once in Terminal):**
+```bash
+sudo chown -R $(whoami):staff /opt/homebrew/share/flutter/packages/flutter_tools/gradle
+```
+
+Then run `flutter run -d android` or `flutter build apk` again.
+
+**Also:** Run as your normal user (not root). If you see “Current version is 8.10”, clear root’s Gradle cache or run the build as your user so Gradle 8.13 from `gradle-wrapper.properties` is used.
+
+### Build: No space left on device
+
+**Problem:** `FileNotFoundException: ... (No space left on device)` or Gradle transform/lock failures.
+
+**Cause:** Disk is full. Gradle and Kotlin need space for caches and build outputs.
+
+**Fix:**
+1. Free disk space (remove large files, empty Trash, uninstall unused apps).
+2. Clean Gradle caches to reclaim space (optional): `rm -rf ~/.gradle/caches/` then `cd android && ./gradlew clean && cd ..` and `flutter clean`.
+3. Run the build as your **normal user** (not root). Root uses `/var/root/.gradle` and can hit permission/lock issues.
+
+### Build: AGP 9+ / new DSL
+
+**Problem:** Flutter says "Starting AGP 9+, only the new DSL interface will be read" and the build fails.
+
+**Fix:** `android.newDsl=false` is already set in `android/gradle.properties`. If you upgrade to AGP 9+ later, see: https://docs.flutter.dev/release/breaking-changes/migrate-to-agp-9
+
+---
+
 ## Issues Fixed
 
 ### 1. Missing Android TV Launcher Category

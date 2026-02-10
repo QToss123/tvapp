@@ -39,7 +39,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _storageLocation = 'Not selected';
   bool _tvCursorEnabled = true;
 
-  final List<String> _syncTypes = ['online', 'from external'];
+  final List<String> _syncTypes = ['online'];
 
   @override
   void initState() {
@@ -59,7 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     final tvCursor = prefs.getBool(_kTVCursorEnabled) ?? Platform.isAndroid;
     setState(() {
-      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'CLA-CL109-S68-KL80AI27OF';
+      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'SPO-CL148-S71-O1MGB7PY3H';
       _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
       _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';
@@ -685,7 +685,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       items: _syncTypes.map((String type) {
                         return DropdownMenuItem<String>(
                           value: type,
-                          child: Text(type == 'online' ? 'Online' : 'From External'),
+                          child: const Text('Online'),
                         );
                       }).toList(),
                       onChanged: (String? value) {
@@ -813,28 +813,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  /// Returns selected folder path, or null. Offers system picker and browse.
+  /// Returns the default Download folder path for the current platform.
+  static String get _defaultDownloadPath {
+    if (Platform.isAndroid) {
+      return '/storage/emulated/0/Download';
+    }
+    if (Platform.isWindows) {
+      return path.join(Platform.environment['USERPROFILE'] ?? 'C:\\Users', 'Downloads');
+    }
+    if (Platform.isLinux) {
+      return path.join(Platform.environment['HOME'] ?? '/home', 'Downloads');
+    }
+    return '';
+  }
+
+  /// Returns selected folder path, or null. Offers Download folder, browse, and system picker.
   Future<String?> _selectStoragePath({String? initialPath}) async {
     if (!mounted) return null;
     final choice = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Select Storage Location'),
+        title: const Text('Where should books be saved?'),
         content: const Text(
-          'System picker: native dialog (internal + external storage)\n\n'
-          'Browse folders: navigate through folders',
+          'Choose the folder where downloaded books will be stored.\n\n'
+          '• Download folder – use your device\'s Download folder\n'
+          '• Browse – pick any folder (internal storage, USB, etc.)\n'
+          '• System picker – use the system folder picker',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, null), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, 'picker'), child: const Text('System picker')),
-          TextButton(onPressed: () => Navigator.pop(context, 'browse'), child: const Text('Browse folders')),
+          if (_defaultDownloadPath.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'download'),
+              child: const Text('Download folder'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'browse'),
+            child: const Text('Browse'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'picker'),
+            child: const Text('System picker'),
+          ),
         ],
       ),
     );
+    if (choice == 'download' && _defaultDownloadPath.isNotEmpty) {
+      return _defaultDownloadPath;
+    }
     if (choice == 'picker') {
       return await FilePicker.platform.getDirectoryPath(
         dialogTitle: 'Select folder for books',
-        initialDirectory: initialPath,
+        initialDirectory: initialPath ?? (Platform.isAndroid ? null : _defaultDownloadPath),
       );
     }
     if (choice == 'browse' && mounted) {
@@ -843,7 +873,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           builder: (context) => FileBrowser(
             initialPath: initialPath,
             selectDirectory: true,
-            title: 'Select Storage Location',
+            title: 'Select folder for books',
           ),
         ),
       );
@@ -961,20 +991,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<String> _getExpiryDate() async {
-    final prefs = await SharedPreferences.getInstance();
-    final expiryDateStr = prefs.getString(_kLicenseExpiryDate) ?? '';
-    if (expiryDateStr.isNotEmpty) {
-      try {
-        final expiryDate = DateTime.parse(expiryDateStr);
-        return '${expiryDate.year}-${expiryDate.month.toString().padLeft(2, '0')}-${expiryDate.day.toString().padLeft(2, '0')}';
-      } catch (e) {
-        return 'Invalid date';
-      }
-    }
-    return 'Not set';
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1047,34 +1063,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ],
                     ],
                   ),
+                  // Expiry date display removed per P1 (remove from installer/settings)
                   if (_isLicenseActivated) ...[
-                    const SizedBox(height: 16),
-                    FutureBuilder<String>(
-                      future: _getExpiryDate(),
-                      builder: (context, snapshot) {
-                        if (snapshot.hasData) {
-                          return Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.grey.shade300),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.calendar_today, size: 20, color: Colors.grey),
-                                const SizedBox(width: 12),
-                                Text(
-                                  'Expiry Date: ${snapshot.data}',
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                              ],
-                            ),
-                          );
-                        }
-                        return const SizedBox.shrink();
-                      },
-                    ),
+                    const SizedBox(height: 8),
                   ],
                 ],
               ),

@@ -10,8 +10,16 @@ plugins {
 
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
+var hasReleaseSigning = false
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    try {
+        keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+        val storePath = keystoreProperties["storeFile"]?.toString() ?: ""
+        val storeFile = rootProject.file(storePath)
+        hasReleaseSigning = storePath.isNotEmpty() && storeFile.exists()
+    } catch (_: Exception) {
+        hasReleaseSigning = false
+    }
 }
 
 android {
@@ -24,10 +32,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
-
     defaultConfig {
         applicationId = "com.liqvid.tv_app_books"
         minSdk = flutter.minSdkVersion
@@ -37,11 +41,11 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            if (keystorePropertiesFile.exists()) {
+        if (hasReleaseSigning) {
+            create("release") {
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
-                storeFile = file(keystoreProperties["storeFile"] as String)
+                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
                 storePassword = keystoreProperties["storePassword"] as String
             }
         }
@@ -49,13 +53,25 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
+            signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
             }
+            // Disable minification so storage, SharedPreferences, and file loading
+            // work reliably in release (avoids "storage not loading" / "file missing")
+            isMinifyEnabled = false
+            isShrinkResources = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
+}
+
+kotlin {
+    jvmToolchain(17)
 }
 
 flutter {

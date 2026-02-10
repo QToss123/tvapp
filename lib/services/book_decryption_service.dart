@@ -132,38 +132,44 @@ class BookDecryptionService {
     required String keyNonceB64,
     required String outputFilePath,
   }) async {
-    debugPrint('🔐 Decrypting encrypted file on disk: $encryptedFilePath');
-    final encryptedFile = File(encryptedFilePath);
-    if (!await encryptedFile.exists()) {
-      throw Exception('Encrypted file not found: $encryptedFilePath');
+    try {
+      debugPrint('🔐 Decrypting encrypted file on disk: $encryptedFilePath');
+      final encryptedFile = File(encryptedFilePath);
+      if (!await encryptedFile.exists()) {
+        throw Exception('Encrypted file not found: $encryptedFilePath');
+      }
+
+      debugPrint('🔐 Reading encrypted file...');
+      final encryptedBytes = await encryptedFile.readAsBytes();
+      debugPrint('🔐 Encrypted file size: ${encryptedBytes.length} bytes');
+
+      final contentKey = await _decryptContentKey(
+        keyEncB64: keyEncB64,
+        keyNonceB64: keyNonceB64,
+        bookId: bookId,
+      );
+      debugPrint('🔐 Content key decrypted (32 bytes)');
+
+      debugPrint('🔐 Decrypting file content (native AES-GCM)...');
+      final stopwatch = Stopwatch()..start();
+      final decryptedBytes = await _decryptFileContent(
+        encryptedData: encryptedBytes,
+        contentKey: contentKey,
+      );
+      stopwatch.stop();
+      debugPrint('🔐 Decrypted ${decryptedBytes.length} bytes in ${stopwatch.elapsedMilliseconds} ms');
+
+      final outFile = File(outputFilePath);
+      await outFile.parent.create(recursive: true);
+      if (await outFile.exists()) await outFile.delete();
+      await outFile.writeAsBytes(decryptedBytes);
+      debugPrint('🔐 Decrypted file saved to: $outputFilePath');
+      return outputFilePath;
+    } catch (e, st) {
+      debugPrint('🔐 decryptFileOnDisk error: $e\n$st');
+      if (e is Exception) rethrow;
+      throw Exception('Decryption failed: $e');
     }
-
-    debugPrint('🔐 Reading encrypted file...');
-    final encryptedBytes = await encryptedFile.readAsBytes();
-    debugPrint('🔐 Encrypted file size: ${encryptedBytes.length} bytes');
-
-    final contentKey = await _decryptContentKey(
-      keyEncB64: keyEncB64,
-      keyNonceB64: keyNonceB64,
-      bookId: bookId,
-    );
-    debugPrint('🔐 Content key decrypted (32 bytes)');
-
-    debugPrint('🔐 Decrypting file content (native AES-GCM)...');
-    final stopwatch = Stopwatch()..start();
-    final decryptedBytes = await _decryptFileContent(
-      encryptedData: encryptedBytes,
-      contentKey: contentKey,
-    );
-    stopwatch.stop();
-    debugPrint('🔐 Decrypted ${decryptedBytes.length} bytes in ${stopwatch.elapsedMilliseconds} ms');
-
-    final outFile = File(outputFilePath);
-    await outFile.parent.create(recursive: true);
-    if (await outFile.exists()) await outFile.delete();
-    await outFile.writeAsBytes(decryptedBytes);
-    debugPrint('🔐 Decrypted file saved to: $outputFilePath');
-    return outputFilePath;
   }
 
   /// Streams download to a temp file to avoid OOM.
@@ -203,61 +209,73 @@ class BookDecryptionService {
     required String keyNonceB64,
     required String bookId,
   }) async {
-    debugPrint('🔐 Using master key (b64): $_masterKeyB64');
-    debugPrint('🔐 keyEncB64 length: ${keyEncB64.length}, keyNonceB64 length: ${keyNonceB64.length}');
-    final masterKey = base64.decode(_masterKeyB64);
-    final encryptedKey = base64.decode(keyEncB64);
-    final nonce = base64.decode(keyNonceB64);
+    try {
+      debugPrint('🔐 Using master key (b64): $_masterKeyB64');
+      debugPrint('🔐 keyEncB64 length: ${keyEncB64.length}, keyNonceB64 length: ${keyNonceB64.length}');
+      final masterKey = base64.decode(_masterKeyB64);
+      final encryptedKey = base64.decode(keyEncB64);
+      final nonce = base64.decode(keyNonceB64);
 
-    if (masterKey.length != 32) {
-      throw Exception('Master key must be 32 bytes, got ${masterKey.length}');
+      if (masterKey.length != 32) {
+        throw Exception('Master key must be 32 bytes, got ${masterKey.length}');
+      }
+      if (nonce.length != _nonceLength) {
+        throw Exception('Nonce must be $_nonceLength bytes, got ${nonce.length}');
+      }
+
+      final aad = utf8.encode('book_id:$bookId');
+      final concatenated = Uint8List.fromList([...nonce, ...encryptedKey]);
+      final secretBox = SecretBox.fromConcatenation(
+        concatenated,
+        nonceLength: _nonceLength,
+        macLength: _macLength,
+        copy: false,
+      );
+      final secretKey = SecretKey(masterKey);
+
+      final decrypted = await _aesGcm.decrypt(
+        secretBox,
+        secretKey: secretKey,
+        aad: aad,
+      );
+
+      if (decrypted.length != 32) {
+        throw Exception(
+            'Decrypted content key must be 32 bytes, got ${decrypted.length}');
+      }
+      return Uint8List.fromList(decrypted);
+    } catch (e, st) {
+      debugPrint('🔐 _decryptContentKey error: $e\n$st');
+      if (e is Exception) rethrow;
+      throw Exception('Content key decryption failed: $e');
     }
-    if (nonce.length != _nonceLength) {
-      throw Exception('Nonce must be $_nonceLength bytes, got ${nonce.length}');
-    }
-
-    final aad = utf8.encode('book_id:$bookId');
-    final concatenated = Uint8List.fromList([...nonce, ...encryptedKey]);
-    final secretBox = SecretBox.fromConcatenation(
-      concatenated,
-      nonceLength: _nonceLength,
-      macLength: _macLength,
-      copy: false,
-    );
-    final secretKey = SecretKey(masterKey);
-
-    final decrypted = await _aesGcm.decrypt(
-      secretBox,
-      secretKey: secretKey,
-      aad: aad,
-    );
-
-    if (decrypted.length != 32) {
-      throw Exception(
-          'Decrypted content key must be 32 bytes, got ${decrypted.length}');
-    }
-    return Uint8List.fromList(decrypted);
   }
 
   static Future<Uint8List> _decryptFileContent({
     required Uint8List encryptedData,
     required Uint8List contentKey,
   }) async {
-    if (encryptedData.length < _nonceLength + _macLength) {
-      throw Exception('Encrypted data too short');
+    try {
+      if (encryptedData.length < _nonceLength + _macLength) {
+        throw Exception('Encrypted data too short');
+      }
+      final secretBox = SecretBox.fromConcatenation(
+        encryptedData,
+        nonceLength: _nonceLength,
+        macLength: _macLength,
+        copy: false,
+      );
+      final secretKey = SecretKey(contentKey);
+      final decrypted = await _aesGcm.decrypt(
+        secretBox,
+        secretKey: secretKey,
+        aad: [],
+      );
+      return Uint8List.fromList(decrypted);
+    } catch (e, st) {
+      debugPrint('🔐 _decryptFileContent error: $e\n$st');
+      if (e is Exception) rethrow;
+      throw Exception('File decryption failed: $e');
     }
-    final secretBox = SecretBox.fromConcatenation(
-      encryptedData,
-      nonceLength: _nonceLength,
-      macLength: _macLength,
-      copy: false,
-    );
-    final secretKey = SecretKey(contentKey);
-    final decrypted = await _aesGcm.decrypt(
-      secretBox,
-      secretKey: secretKey,
-      aad: [],
-    );
-    return Uint8List.fromList(decrypted);
   }
 }

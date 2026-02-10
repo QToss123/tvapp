@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/book.dart';
@@ -22,7 +24,8 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _licenseStatusMessage;
   bool _isStorageConnected = true;
   String? _storageLocation;
-  bool _hasInternet = true;
+  bool _hasInternet = false;
+  Timer? _connectivityTimer;
   
   // Books loaded from API or fallback to dummy data
   List<Book> _books = [];
@@ -235,17 +238,30 @@ class _HomeScreenState extends State<HomeScreen> {
     debugPrint('');
     _checkLicenseStatus();
     _checkConnectivity();
+    // Check every 30s (was 6s) to avoid repeated DNS lookups and release APK issues
+    _connectivityTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkConnectivity());
   }
 
   Future<void> _checkConnectivity() async {
-    final connected = await ConnectivityHelper.hasInternetConnection();
-    if (mounted) {
-      setState(() => _hasInternet = connected);
+    try {
+      final connected = await ConnectivityHelper.hasInternetConnection();
+      if (mounted) {
+        setState(() => _hasInternet = connected);
+      }
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('Connectivity check failed: $e\n$st');
+      }
+      if (mounted) {
+        setState(() => _hasInternet = false);
+      }
     }
   }
-  
+
   @override
   void dispose() {
+    _connectivityTimer?.cancel();
+    _connectivityTimer = null;
     debugPrint('🗑️ [HOME] dispose() called - HomeScreen widget destroyed');
     _searchFocusNode.dispose();
     super.dispose();

@@ -346,7 +346,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
               if (mounted) {
                 setState(() {
                   _isLoading = false;
-                  _error = error.description;
+                  _error = 'The book page couldn’t be loaded.\n\n'
+                      'Please try again or open a different book.';
                 });
               }
             } else {
@@ -388,8 +389,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
       _controller.loadRequest(Uri.parse('about:blank'));
       setState(() {
         _isLoading = false;
-        _error = 'No content URL. This book may not have been fully downloaded.\n\n'
-            'Go to Sync to download books, then try again.';
+        _error = 'This book isn’t ready to open yet.\n\n'
+            'Go to Sync to download it first, then try again.';
       });
     }
   }
@@ -489,14 +490,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
       debugPrint('Failed to load asset: $e');
       setState(() {
         _isLoading = false;
-        _error = 'Failed to load book from $assetPath\n\n'
-            'Error: $e\n\n'
-            'Make sure:\n'
-            '1. The file exists: $assetPath\n'
-            '2. pubspec.yaml includes: assets/books/\n'
-            '3. Run "flutter pub get"\n'
-            '4. Run "flutter clean" and rebuild\n'
-            '5. Restart the app completely (not hot reload)';
+        _error = 'This book couldn’t be loaded.\n\n'
+            'Please try closing and reopening the app, or open a different book.';
       });
     }
   }
@@ -523,6 +518,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
   /// This bypasses Android 10+ file:// access restrictions
   /// Cleans up the copied folder when done
   Future<void> _loadFile(String fileUrl) async {
+    bool dialogOpen = false;
     try {
       await _loadTvCursorSetting();
       debugPrint('📂 [READING] Loading file from external storage: $fileUrl');
@@ -537,7 +533,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       String dialogMessage = 'Preparing...';
       String? dialogError;
       int currentStepIndex = 0;
-      bool dialogOpen = false;
       StateSetter? dialogSetState;
       Future<void> updateDialog({
         required String stepKey,
@@ -646,7 +641,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         await updateDialog(
           stepKey: 'Checking file',
           message: 'File not found',
-          error: 'File not found: $filePath',
+          error: 'This file is missing or was moved. Try downloading the book again from Sync.',
         );
         throw Exception('File not found: $filePath');
       }
@@ -702,13 +697,28 @@ class _ReadingScreenState extends State<ReadingScreen> {
               message: 'Decrypt complete ($decryptedSize bytes)',
             );
           }
-        } catch (e) {
-        await updateDialog(
-          stepKey: 'Decrypting',
-          message: 'Decryption failed',
-          error: 'Incorrect format. Please ensure the content is in the correct format.',
-        );
-        rethrow;
+        } catch (e, st) {
+          debugPrint('❌ [READING] Decryption failed: $e\n$st');
+          await updateDialog(
+            stepKey: 'Decrypting',
+            message: 'Decryption failed',
+            error: 'This file doesn’t match this book. Try downloading the book again from Sync.',
+          );
+          if (mounted) {
+            if (dialogOpen && Navigator.canPop(context)) {
+              Navigator.pop(context);
+              dialogOpen = false;
+            }
+            setState(() {
+              _isLoading = false;
+              _error = 'This book couldn’t be opened.\n\n'
+                  'The file doesn’t match this book (it may have been copied from somewhere else or the book was re-downloaded with a new key).\n\n'
+                  'What to do:\n'
+                  '• Go to Sync and download this book again, or\n'
+                  '• Open it from the same folder where you first downloaded it.';
+            });
+          }
+          return;
         }
       }
       
@@ -723,7 +733,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         await updateDialog(
           stepKey: 'Unzipping',
           message: 'Unzip failed',
-          error: 'Incorrect format. Please ensure the content is in the correct format.',
+          error: 'This file can’t be opened as a book. Try downloading the book again from Sync.',
         );
         rethrow;
       }
@@ -783,46 +793,82 @@ class _ReadingScreenState extends State<ReadingScreen> {
         debugPrint('🌐 [READING] Loading book via HTTP: $bookUrl');
       }
 
+      // Close "Opening book" dialog before loading so we don't appear stuck if loadRequest is slow (e.g. Android TV WebView)
+      if (mounted && dialogOpen && Navigator.canPop(context)) {
+        Navigator.pop(context);
+        dialogOpen = false;
+      }
+
       if (Platform.isLinux || Platform.isWindows) {
-        // Close dialog first to avoid deadlock, then load in next frame.
-        if (dialogOpen && Navigator.canPop(context)) {
-          Navigator.pop(context);
-        }
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             _controller.loadRequest(Uri.parse(bookUrl));
-            debugPrint('✅ [READING] Load initiated after dialog closed (desktop)');
+            debugPrint('✅ [READING] Load initiated (desktop)');
           }
         });
       } else {
-        await _controller.loadRequest(Uri.parse(bookUrl));
+        // Android/Android TV: WebView is often not attached until after the dialog closes and a frame runs.
+        // Post-frame + 300ms delay so the book opens reliably after decrypt/unzip.
+        if (mounted) setState(() => _isLoading = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          await Future.delayed(const Duration(milliseconds: 300));
+          if (!mounted) return;
+          try {
+            _controller.loadRequest(Uri.parse(bookUrl));
+            debugPrint('✅ [READING] Load initiated (Android TV): $bookUrl');
+          } catch (e) {
+            debugPrint('❌ [READING] loadRequest failed: $e');
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+                _error = 'The reader couldn’t open this book.\n\n'
+                    'Please try again or open a different book.';
+              });
+            }
+          }
+        });
+      }
+    } catch (e, st) {
+      debugPrint('❌ [READING] Failed to load file: $e\n$st');
+      await _stopLocalServer();
+      if (mounted) {
         if (dialogOpen && Navigator.canPop(context)) {
           Navigator.pop(context);
+          dialogOpen = false;
         }
-        debugPrint('✅ [READING] Successfully loaded book');
-        setState(() => _isLoading = false);
+        final errorStr = e.toString().toLowerCase();
+        final isFormatError = errorStr.contains('format') ||
+            errorStr.contains('invalid zip') ||
+            errorStr.contains('corrupt') ||
+            errorStr.contains('decryption failed');
+        final isDecryptKeyError = errorStr.contains('secretbox') ||
+            errorStr.contains('message authentication code') ||
+            errorStr.contains('secretboxauthenticationerror') ||
+            errorStr.contains('wrong mac');
+        setState(() {
+          _isLoading = false;
+          if (isDecryptKeyError) {
+            _error = 'This book couldn’t be opened.\n\n'
+                'The file doesn’t match this book (it may have been copied from somewhere else or the book was re-downloaded with a new key).\n\n'
+                'What to do:\n'
+                '• Go to Sync and download this book again, or\n'
+                '• Open it from the same folder where you first downloaded it.';
+          } else if (isFormatError) {
+            _error = 'This file can’t be opened as a book.\n\n'
+                'Please check that it’s the correct file and try again.';
+          } else {
+            _error = 'This book couldn’t be opened.\n\n'
+                'Please check that:\n'
+                '• The file is still in the same folder\n'
+                '• The app has permission to read that folder\n\n'
+                'If you moved or copied the file, try opening it from Sync after downloading again.';
+          }
+        });
       }
-    } catch (e) {
-      debugPrint('❌ [READING] Failed to load file: $e');
-      // Clean up on error
-      await _stopLocalServer();
-      final errorStr = e.toString().toLowerCase();
-      final isFormatError = errorStr.contains('format') ||
-          errorStr.contains('invalid zip') ||
-          errorStr.contains('corrupt') ||
-          errorStr.contains('decryption failed');
-      setState(() {
-        _isLoading = false;
-        _error = isFormatError
-            ? 'Incorrect format. Please ensure the content is in the correct format.'
-            : 'Failed to load book from external storage\n\n'
-                'File: $fileUrl\n'
-                'Error: $e\n\n'
-                'Make sure:\n'
-                '1. The file exists at the specified path\n'
-                '2. The device has read permissions\n'
-                '3. The path is correct (e.g., file:///storage/XXXX-XXXX/books/book1/index.html or file:///storage/XXXX-XXXX/books/book1.zip)';
-      });
+    } finally {
+      if (mounted && dialogOpen && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
     }
   }
 
@@ -1012,12 +1058,12 @@ class _ReadingScreenState extends State<ReadingScreen> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Error loading content',
+                      'Couldn’t load this book',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      _error ?? 'Unknown error',
+                      _error ?? 'Something went wrong. Please try again.',
                       style: Theme.of(context).textTheme.bodyMedium,
                       textAlign: TextAlign.center,
                     ),

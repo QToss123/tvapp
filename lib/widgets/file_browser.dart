@@ -37,18 +37,44 @@ class FileBrowser extends StatefulWidget {
   State<FileBrowser> createState() => _FileBrowserState();
 }
 
-class _FileBrowserState extends State<FileBrowser> {
+class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
   String? _currentPath;
   List<FileSystemEntity> _items = [];
   bool _isLoading = false;
   String? _error;
   bool _showStorageLocations = false;
   List<StorageLocation> _storageLocations = [];
+  bool _permissionDenied = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeAndLoad();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    // User may have returned from Settings after granting "All files access"
+    if (Platform.isAndroid && _permissionDenied) {
+      PermissionHelper.hasStoragePermissions().then((granted) {
+        if (granted && mounted) {
+          setState(() {
+            _permissionDenied = false;
+            _error = null;
+            _isLoading = true;
+          });
+          _initializeAndLoad();
+        }
+      });
+    }
   }
 
   /// Get list of all available storage locations (internal + USB drives)
@@ -108,6 +134,7 @@ class _FileBrowserState extends State<FileBrowser> {
       '/mnt/sdcard',
     ];
     
+    String? addedInternalPath;
     for (final internalPath in internalPaths) {
       try {
         final dir = Directory(internalPath);
@@ -120,6 +147,7 @@ class _FileBrowserState extends State<FileBrowser> {
               isInternal: true,
               displayPath: internalPath,
             ));
+            addedInternalPath = internalPath;
             break; // Only add one internal storage path
           } catch (e) {
             debugPrint('Cannot access internal storage $internalPath: $e');
@@ -131,7 +159,36 @@ class _FileBrowserState extends State<FileBrowser> {
         continue;
       }
     }
-    
+
+    // Android: add Download folder so it's easy to select (standard path for downloads)
+    if (Platform.isAndroid && addedInternalPath != null) {
+      final downloadPaths = [
+        path.join(addedInternalPath, 'Download'),
+        '/storage/emulated/0/Download',
+        '/sdcard/Download',
+      ];
+      for (final downloadPath in downloadPaths) {
+        try {
+          final dir = Directory(downloadPath);
+          if (await dir.exists()) {
+            try {
+              await dir.list().first.timeout(const Duration(milliseconds: 300));
+              if (!locations.any((l) => l.path == downloadPath)) {
+                locations.add(StorageLocation(
+                  path: downloadPath,
+                  name: 'Download folder',
+                  isInternal: true,
+                  displayPath: downloadPath,
+                ));
+                debugPrint('Added Download folder: $downloadPath');
+              }
+              break;
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
+    }
+
     // Check /mnt/expand for adopted storage (external SD formatted as internal)
     try {
       final expandDir = Directory('/mnt/expand');
@@ -155,7 +212,7 @@ class _FileBrowserState extends State<FileBrowser> {
       }
     } catch (_) {}
 
-    // Check /mnt/media_rw for USB drives (more reliable on Android TV)
+    // Check /mnt/media_rw for USB drives (common on Android TV)
     try {
       final mediaRwDir = Directory('/mnt/media_rw');
       if (await mediaRwDir.exists()) {
@@ -163,26 +220,13 @@ class _FileBrowserState extends State<FileBrowser> {
         try {
           int count = 0;
           await for (final entity in mediaRwDir.list()) {
-            // Yield control periodically to avoid blocking UI
-            if (count++ % 5 == 0) {
-              await Future.delayed(const Duration(milliseconds: 1));
-            }
-            
+            if (count++ % 5 == 0) await Future.delayed(const Duration(milliseconds: 1));
             if (entity is Directory) {
               final dirName = path.basename(entity.path);
               final fullPath = entity.path;
-              
-              debugPrint('Found directory in /mnt/media_rw: $fullPath');
-              
               try {
-                // Test if we can actually access and list this directory
                 await entity.list().first.timeout(const Duration(milliseconds: 500));
-                
-                // Check if we already have this path
-                final pathExists = locations.any((loc) => loc.path == fullPath || 
-                  path.basename(loc.path) == dirName);
-                
-                if (!pathExists) {
+                if (!locations.any((loc) => loc.path == fullPath || path.basename(loc.path) == dirName)) {
                   debugPrint('Adding USB drive: $fullPath');
                   locations.add(StorageLocation(
                     path: fullPath,
@@ -193,18 +237,66 @@ class _FileBrowserState extends State<FileBrowser> {
                 }
               } catch (e) {
                 debugPrint('Cannot access $fullPath: $e');
-                continue;
               }
             }
           }
         } catch (e) {
           debugPrint('Cannot list /mnt/media_rw: $e');
         }
-      } else {
-        debugPrint('/mnt/media_rw does not exist');
       }
     } catch (e) {
       debugPrint('Cannot access /mnt/media_rw: $e');
+    }
+
+    // Android TV / OEM-specific USB mount points
+    final androidUsbRoots = [
+      '/mnt/usb',
+      '/mnt/usbdisk',
+      '/mnt/usb_storage',
+      '/mnt/udisk',
+      '/storage/usb0',
+      '/storage/usb1',
+      '/storage/udisk',
+    ];
+    for (final root in androidUsbRoots) {
+      try {
+        final dir = Directory(root);
+        if (await dir.exists()) {
+          try {
+            await dir.list().first.timeout(const Duration(milliseconds: 500));
+            if (!locations.any((l) => l.path == root)) {
+              locations.add(StorageLocation(
+                path: root,
+                name: 'External USB ($root)',
+                isInternal: false,
+                displayPath: root,
+              ));
+              debugPrint('Added USB root: $root');
+            }
+          } catch (_) {}
+          // Also list subdirs (e.g. /mnt/usb/sda1)
+          try {
+            await for (final entity in dir.list()) {
+              if (entity is Directory) {
+                final fullPath = entity.path;
+                final dirName = path.basename(fullPath);
+                try {
+                  await entity.list().first.timeout(const Duration(milliseconds: 300));
+                  if (!locations.any((l) => l.path == fullPath)) {
+                    locations.add(StorageLocation(
+                      path: fullPath,
+                      name: 'USB Drive ($dirName)',
+                      isInternal: false,
+                      displayPath: fullPath,
+                    ));
+                    debugPrint('Added USB: $fullPath');
+                  }
+                } catch (_) {}
+              }
+            }
+          } catch (_) {}
+        }
+      } catch (_) {}
     }
     
     // Check /storage for mounted devices (including USB drives)
@@ -267,22 +359,39 @@ class _FileBrowserState extends State<FileBrowser> {
       debugPrint('Cannot access /storage: $e');
     }
     
-    // If we still have no external storage found, add /storage as an option
-    // so user can manually navigate to find USB drives
-    final hasExternal = locations.any((loc) => !loc.isInternal);
-    if (!hasExternal) {
+    // On Android, always add "Browse All Storage Devices" first so user can
+    // manually navigate to /storage and find USB drives (required in release APK)
+    if (Platform.isAndroid) {
       try {
         final storageDir = Directory('/storage');
-        if (await storageDir.exists()) {
-          locations.add(StorageLocation(
+        if (await storageDir.exists() && !locations.any((l) => l.path == '/storage')) {
+          locations.insert(0, StorageLocation(
             path: '/storage',
-            name: 'Browse All Storage Devices',
+            name: 'Browse All Storage Devices (USB / SD)',
             isInternal: false,
             displayPath: '/storage',
           ));
+          debugPrint('Added Browse All Storage for Android');
         }
       } catch (e) {
-        debugPrint('Cannot add /storage fallback: $e');
+        debugPrint('Cannot add /storage option: $e');
+      }
+    } else {
+      final hasExternal = locations.any((loc) => !loc.isInternal);
+      if (!hasExternal) {
+        try {
+          final storageDir = Directory('/storage');
+          if (await storageDir.exists()) {
+            locations.add(StorageLocation(
+              path: '/storage',
+              name: 'Browse All Storage Devices',
+              isInternal: false,
+              displayPath: '/storage',
+            ));
+          }
+        } catch (e) {
+          debugPrint('Cannot add /storage fallback: $e');
+        }
       }
     }
     
@@ -297,10 +406,14 @@ class _FileBrowserState extends State<FileBrowser> {
       if (!hasPermission) {
         final granted = await PermissionHelper.requestStoragePermissions();
         if (!granted) {
-          setState(() {
-            _error = 'Storage permission is required to browse folders. Please grant permission in app settings.';
-            _isLoading = false;
-          });
+          if (mounted) {
+            setState(() {
+              _permissionDenied = true;
+              _error = 'Storage permission is required to browse folders (including USB drives). '
+                  'Please enable "All files access" in the next screen.';
+              _isLoading = false;
+            });
+          }
           return;
         }
       }
@@ -621,19 +734,18 @@ class _FileBrowserState extends State<FileBrowser> {
               ),
               const SizedBox(height: 24),
               ElevatedButton.icon(
-                onPressed: () async {
-                  setState(() {
-                    _isLoading = true;
-                  });
-                  final storageLocations = await _getAllStorageLocations();
-                  setState(() {
-                    _storageLocations = storageLocations;
-                    _isLoading = false;
-                  });
-                },
+                onPressed: _isLoading ? null : _refreshStorageLocations,
                 icon: const Icon(Icons.refresh),
                 label: const Text('Refresh'),
               ),
+              if (Platform.isAndroid) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'If USB does not appear, tap "Browse All Storage (USB / SD)" and open the USB folder, or enable All files access in app settings.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ],
           ),
         ),
@@ -676,11 +788,30 @@ class _FileBrowserState extends State<FileBrowser> {
     );
   }
 
+  Future<void> _refreshStorageLocations() async {
+    setState(() => _isLoading = true);
+    final storageLocations = await _getAllStorageLocations();
+    if (mounted) {
+      setState(() {
+        _storageLocations = storageLocations;
+        _isLoading = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.title ?? (widget.selectDirectory ? 'Select Folder' : 'Select File')),
+        actions: [
+          if (_showStorageLocations && Platform.isAndroid)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh storage list (plug in USB then tap)',
+              onPressed: _isLoading ? null : _refreshStorageLocations,
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -751,6 +882,32 @@ class _FileBrowserState extends State<FileBrowser> {
                                     style: const TextStyle(fontSize: 16),
                                   ),
                                   const SizedBox(height: 24),
+                                  if (Platform.isAndroid && _permissionDenied) ...[
+                                    ElevatedButton.icon(
+                                      onPressed: () async {
+                                        await PermissionHelper.openAllFilesAccessSettings();
+                                        // Re-check after a short delay (user may have granted)
+                                        await Future.delayed(const Duration(milliseconds: 500));
+                                        if (mounted) {
+                                          final granted = await PermissionHelper.hasStoragePermissions();
+                                          if (granted) {
+                                            setState(() {
+                                              _permissionDenied = false;
+                                              _error = null;
+                                              _isLoading = true;
+                                            });
+                                            _initializeAndLoad();
+                                          }
+                                        }
+                                      },
+                                      icon: const Icon(Icons.settings),
+                                      label: const Text('Open settings – Allow all files (USB)'),
+                                      style: ElevatedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                  ],
                                   ElevatedButton.icon(
                                     onPressed: () => _loadPath(_currentPath),
                                     icon: const Icon(Icons.refresh),

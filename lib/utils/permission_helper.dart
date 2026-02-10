@@ -47,15 +47,17 @@ class PermissionHelper {
 
   /// Opens the All Files Access settings screen (Android 11+).
   /// Call when MANAGE_EXTERNAL_STORAGE is denied so user can grant it manually.
+  /// Required for folder selection from USB drives in release APK.
   static Future<bool> openAllFilesAccessSettings() async {
     if (!Platform.isAndroid) return true;
     try {
-      final status = await ph.Permission.manageExternalStorage.status;
-      if (status.isGranted) return true;
+      if (await ph.Permission.manageExternalStorage.isGranted) return true;
+      // request() opens the system "All files access" permission screen on Android 11+
       await ph.Permission.manageExternalStorage.request();
       return await ph.Permission.manageExternalStorage.isGranted;
     } catch (e) {
       debugPrint('Open all files access error: $e');
+      // Fallback: open app settings so user can find "Files and media" / "All files"
       return await ph.openAppSettings();
     }
   }

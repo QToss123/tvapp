@@ -57,6 +57,32 @@ class _SyncScreenState extends State<SyncScreen> {
   String? _storageLocationForSync;
   List<Map<String, dynamic>> _allCoursesForSync = [];
 
+  /// TV / large screen: slight scale for readability without bulky cards.
+  static bool _isTvOrLargeScreen(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    return width >= 600;
+  }
+
+  static double _tvFontSize(BuildContext context, double base) {
+    return _isTvOrLargeScreen(context) ? base * 1.1 : base;
+  }
+
+  static double _tvSize(BuildContext context, double base) {
+    return _isTvOrLargeScreen(context) ? base * 1.15 : base;
+  }
+
+  static int _tvGridColumns(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    if (width >= 1200) return 8;
+    if (width >= 900) return 6;
+    if (width >= 600) return 5;
+    return 4;
+  }
+
+  static double _tvGridAspectRatio(BuildContext context) {
+    return _isTvOrLargeScreen(context) ? 0.62 : 0.65;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -630,7 +656,7 @@ class _SyncScreenState extends State<SyncScreen> {
       },
       child: Scaffold(
       appBar: AppBar(
-        title: const Text('Syncing Books'),
+        title: const Text('Syncing Books', style: TextStyle(fontWeight: FontWeight.w600)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           tooltip: 'Back',
@@ -638,30 +664,39 @@ class _SyncScreenState extends State<SyncScreen> {
         ),
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
               _statusMessage,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
+              style: TextStyle(
+                fontSize: _tvFontSize(context, 18),
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade900,
               ),
             ),
             if (_isLoading && (_totalBooks > 0 || _syncItems.isNotEmpty)) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               LinearProgressIndicator(
                 value: () {
                   final total = _totalBooks > 0 ? _totalBooks : _syncItems.length;
                   if (total <= 0) return null;
                   return (_downloadedBooks / total).clamp(0.0, 1.0);
                 }(),
+                minHeight: _tvSize(context, 8),
+                backgroundColor: Colors.grey.shade300,
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
               ),
+              const SizedBox(height: 6),
               Text(
                 '$_downloadedBooks / ${_totalBooks > 0 ? _totalBooks : _syncItems.length} complete',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                style: TextStyle(
+                  fontSize: _tvFontSize(context, 14),
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey.shade700,
+                ),
               ),
             ],
             if (_fetchDone &&
@@ -674,7 +709,11 @@ class _SyncScreenState extends State<SyncScreen> {
                   final selectedCount = _syncItems.where((s) => s.selected).length;
                   return Text(
                     '${selectedCount} of ${_syncItems.length} selected (check/uncheck to choose which to download)',
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                    style: TextStyle(
+                      fontSize: _tvFontSize(context, 15),
+                      color: Colors.grey.shade800,
+                      fontWeight: FontWeight.w500,
+                    ),
                   );
                 },
               ),
@@ -687,12 +726,15 @@ class _SyncScreenState extends State<SyncScreen> {
                         final selectedCount = _syncItems.where((s) => s.selected).length;
                         return ElevatedButton.icon(
                           onPressed: selectedCount > 0 ? _runDownloadsNow : null,
-                          icon: const Icon(Icons.download),
-                          label: Text(selectedCount > 0
-                              ? 'Download ($selectedCount selected)'
-                              : 'Select at least 1 book'),
+                          icon: const Icon(Icons.download, size: 20),
+                          label: Text(
+                            selectedCount > 0
+                                ? 'Download ($selectedCount selected)'
+                                : 'Select at least 1 book',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
                           style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                           ),
                         );
                       },
@@ -716,10 +758,10 @@ class _SyncScreenState extends State<SyncScreen> {
                           Navigator.pushReplacementNamed(
                               context, AppRoutes.home);
                         },
-                        icon: const Icon(Icons.cloud_download),
-                        label: const Text('Sync in background'),
+                        icon: const Icon(Icons.cloud_download, size: 20),
+                        label: const Text('Sync in background', style: TextStyle(fontWeight: FontWeight.w600)),
                         style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                         ),
                       ),
                     ),
@@ -740,37 +782,27 @@ class _SyncScreenState extends State<SyncScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(
-                                Icons.check_circle,
-                                size: 64,
-                                color: Colors.green,
-                              ),
-                              const SizedBox(height: 24),
+                              const Icon(Icons.check_circle, size: 56, color: Colors.green),
+                              const SizedBox(height: 20),
                               ElevatedButton.icon(
-                                onPressed: () {
-                                  Navigator.pushReplacementNamed(
-                                      context, AppRoutes.home);
-                                },
+                                onPressed: () => Navigator.pushReplacementNamed(context, AppRoutes.home),
                                 icon: const Icon(Icons.library_books),
-                                label: const Text('Go to Bookshelf'),
+                                label: const Text('Go to Bookshelf', style: TextStyle(fontWeight: FontWeight.w600)),
                                 style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 32,
-                                    vertical: 16,
-                                  ),
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                                 ),
                               ),
                             ],
                           ),
                         )
                       : GridView.builder(
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 8,
-                            childAspectRatio: 0.65,
-                            crossAxisSpacing: 8,
-                            mainAxisSpacing: 8,
+                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: _tvGridColumns(context),
+                            childAspectRatio: _tvGridAspectRatio(context),
+                            crossAxisSpacing: _tvSize(context, 12),
+                            mainAxisSpacing: _tvSize(context, 12),
                           ),
-                          padding: const EdgeInsets.only(bottom: 16),
+                          padding: EdgeInsets.only(bottom: _tvSize(context, 24)),
                           itemCount: _syncItems.length,
                           itemBuilder: (context, i) {
                             final item = _syncItems[i];
@@ -801,17 +833,12 @@ class _SyncScreenState extends State<SyncScreen> {
               Focus(
                 autofocus: true,
                 child: ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.pushReplacementNamed(context, AppRoutes.home);
-                  },
+                  onPressed: () => Navigator.pushReplacementNamed(context, AppRoutes.home),
                   icon: const Icon(Icons.library_books),
-                  label: const Text('Go to Bookshelf'),
+                  label: const Text('Go to Bookshelf', style: TextStyle(fontWeight: FontWeight.w600)),
                   style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 16,
-                    ),
-                    elevation: 8,
+                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                    elevation: 6,
                   ),
                 ),
               ),
@@ -837,147 +864,221 @@ class _SyncItemGridTile extends StatelessWidget {
     this.onResume,
   });
 
+  bool _isTv(BuildContext context) => MediaQuery.sizeOf(context).width >= 600;
+
+  double _fs(BuildContext context, double base) =>
+      _isTv(context) ? base * 1.1 : base;
+
+  double _px(BuildContext context, double base) =>
+      _isTv(context) ? base * 1.1 : base;
+
   @override
   Widget build(BuildContext context) {
     final isDone = item.status == 'done';
     final isError = item.status == 'error';
     final isPaused = item.status == 'paused';
     final isDownloading = item.status == 'downloading';
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Thumbnail
-          Expanded(
-            flex: 3,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ClipRect(
-                  child: item.thumbnail != null && item.thumbnail!.isNotEmpty
-                      ? Image.network(
-                          item.thumbnail!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _placeholder(),
-                        )
-                      : _placeholder(),
-                ),
-                if (onSelectChanged != null && !isDone && !isError)
-                  Positioned(
-                    top: 2,
-                    left: 2,
-                    child: Material(
-                      color: Colors.white.withOpacity(0.9),
-                      borderRadius: BorderRadius.circular(4),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(4),
-                        onTap: () => onSelectChanged!(!item.selected),
-                        child: Padding(
-                          padding: const EdgeInsets.all(2),
-                          child: Checkbox(
-                            value: item.selected,
-                            onChanged: (v) => onSelectChanged!(v ?? true),
-                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                if (isDone)
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: Icon(Icons.check_circle, color: Colors.green, size: 18),
-                  ),
-              ],
+    final tv = _isTv(context);
+    final statusColor = isError
+        ? Colors.red
+        : isPaused
+            ? Colors.orange
+            : isDone
+                ? Colors.green
+                : Colors.blue;
+
+    return Focus(
+      child: Builder(
+        builder: (context) {
+          final hasFocus = Focus.of(context).hasFocus;
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: hasFocus
+                  ? Border.all(color: Colors.blueAccent, width: 2)
+                  : null,
+              boxShadow: hasFocus
+                  ? [BoxShadow(color: Colors.blueAccent.withOpacity(0.3), blurRadius: 6, spreadRadius: 0)]
+                  : null,
             ),
-          ),
-          // Title and progress
-          Expanded(
-            flex: 2,
-            child: Padding(
-              padding: const EdgeInsets.all(4),
+            child: Card(
+              clipBehavior: Clip.antiAlias,
+              elevation: hasFocus ? 8 : 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              color: Colors.grey.shade50,
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    item.title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 10,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  LinearProgressIndicator(
-                    value: isDone || isError || isPaused
-                        ? (isDone ? 1.0 : (item.progress / 100).clamp(0.0, 1.0))
-                        : (item.progress / 100).clamp(0.0, 1.0),
-                    backgroundColor: Colors.grey.shade200,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      isError ? Colors.red : isPaused ? Colors.orange : Colors.green,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        isDone
-                            ? 'Done'
-                            : isError
-                                ? 'Error'
-                                : isPaused
-                                    ? '${item.progress}%'
-                                    : '${item.progress}%',
-                        style: TextStyle(
-                          fontSize: 9,
-                          color: isError
-                              ? Colors.red
-                              : isPaused
-                                  ? Colors.orange
-                                  : Colors.grey.shade600,
+                  // Thumbnail
+                  Expanded(
+                    flex: 3,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        ClipRect(
+                          child: item.thumbnail != null && item.thumbnail!.isNotEmpty
+                              ? Image.network(
+                                  item.thumbnail!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => _placeholder(context),
+                                )
+                              : _placeholder(context),
                         ),
-                      ),
-                      if (isDownloading && onPause != null)
-                        IconButton(
-                          icon: const Icon(Icons.pause_circle),
-                          iconSize: 18,
-                          tooltip: 'Pause',
-                          onPressed: onPause,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                        )
-                      else if ((isError || isPaused) && onResume != null)
-                        IconButton(
-                          icon: Icon(
-                            isPaused ? Icons.play_circle : Icons.refresh,
-                            size: 18,
+                        // Subtle gradient for title readability
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            height: _px(context, 20),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.transparent,
+                                  Colors.black.withOpacity(0.6),
+                                ],
+                              ),
+                            ),
                           ),
-                          tooltip: isPaused ? 'Resume' : 'Retry',
-                          onPressed: onResume,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
                         ),
-                    ],
+                        if (onSelectChanged != null && !isDone && !isError)
+                          Positioned(
+                            top: _px(context, 4),
+                            left: _px(context, 4),
+                            child: Material(
+                              color: Colors.white.withOpacity(0.95),
+                              borderRadius: BorderRadius.circular(6),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(6),
+                                onTap: () => onSelectChanged!(!item.selected),
+                                child: Padding(
+                                  padding: EdgeInsets.all(_px(context, 4)),
+                                  child: Checkbox(
+                                    value: item.selected,
+                                    onChanged: (v) => onSelectChanged!(v ?? true),
+                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    visualDensity: tv
+                                        ? VisualDensity.standard
+                                        : VisualDensity.compact,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (isDone)
+                          Positioned(
+                            top: _px(context, 4),
+                            right: _px(context, 4),
+                            child: Icon(Icons.check_circle, color: Colors.green, size: _fs(context, 16)),
+                          ),
+                        if (isError)
+                          Positioned(
+                            top: _px(context, 4),
+                            right: _px(context, 4),
+                            child: Icon(Icons.error, color: Colors.red, size: _fs(context, 16)),
+                          ),
+                      ],
+                    ),
+                  ),
+                  // Title and progress (flexible to avoid overflow)
+                  Expanded(
+                    flex: 2,
+                    child: Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.symmetric(
+                        horizontal: _px(context, 4),
+                        vertical: _px(context, 3),
+                      ),
+                      color: Colors.white,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.title,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: _fs(context, 11),
+                                color: Colors.grey.shade900,
+                                height: 1.2,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          SizedBox(height: _px(context, 2)),
+                          LinearProgressIndicator(
+                            value: isDone || isError || isPaused
+                                ? (isDone ? 1.0 : (item.progress / 100).clamp(0.0, 1.0))
+                                : (item.progress / 100).clamp(0.0, 1.0),
+                            minHeight: 3,
+                            backgroundColor: Colors.grey.shade300,
+                            valueColor: AlwaysStoppedAnimation<Color>(statusColor),
+                          ),
+                          SizedBox(height: _px(context, 2)),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  isDone
+                                      ? 'Done'
+                                      : isError
+                                          ? 'Error'
+                                          : isPaused
+                                              ? '${item.progress}%'
+                                              : '${item.progress}%',
+                                  style: TextStyle(
+                                    fontSize: _fs(context, 10),
+                                    fontWeight: FontWeight.w600,
+                                    color: statusColor,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (isDownloading && onPause != null)
+                                IconButton(
+                                  icon: const Icon(Icons.pause_circle),
+                                  iconSize: _fs(context, 18),
+                                  tooltip: 'Pause',
+                                  onPressed: onPause,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                )
+                              else if ((isError || isPaused) && onResume != null)
+                                IconButton(
+                                  icon: Icon(isPaused ? Icons.play_circle : Icons.refresh, size: _fs(context, 18)),
+                                  tooltip: isPaused ? 'Resume' : 'Retry',
+                                  onPressed: onResume,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 
-  Widget _placeholder() {
+  Widget _placeholder(BuildContext context) {
     return Container(
       color: Colors.grey.shade300,
-      child: Icon(Icons.book, color: Colors.grey.shade600, size: 24),
+      child: Icon(Icons.auto_stories_rounded, color: Colors.grey.shade600, size: 28),
     );
   }
 }
