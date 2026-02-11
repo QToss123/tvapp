@@ -792,7 +792,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('Where should books be saved?'),
         content: const Text(
           'Choose the folder where downloaded books will be stored.\n\n'
-          '• Download folder – use your device\'s Download folder\n'
+          '• Downloads – use your device\'s Download folder\n'
           '• Browse – pick any folder (internal storage, USB, etc.)\n'
           '• System picker – use the system folder picker',
         ),
@@ -801,7 +801,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (_defaultDownloadPath.isNotEmpty)
             TextButton(
               onPressed: () => Navigator.pop(context, 'download'),
-              child: const Text('Download folder'),
+              child: const Text('Downloads'),
             ),
           TextButton(
             onPressed: () => Navigator.pop(context, 'browse'),
@@ -950,7 +950,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(title: const Text('WebBooks Settings')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -962,7 +962,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'License',
+                    'Enter your license number',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
@@ -978,7 +978,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           enabled: !_isLicenseActivated,
                           maxLength: 24,
                           decoration: InputDecoration(
-                            labelText: 'License Number',
+                            labelText: 'Enter your license number',
                             hintText: 'Enter your license number',
                             border: const OutlineInputBorder(),
                             prefixIcon: const Icon(Icons.vpn_key),
@@ -1006,7 +1006,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: ElevatedButton.icon(
                             onPressed: _activateLicense,
                             icon: const Icon(Icons.verified),
-                            label: const Text('Add Licence'),
+                            label: const Text('Activate'),
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 20,

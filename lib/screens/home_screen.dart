@@ -531,7 +531,7 @@ class _HomeScreenState extends State<HomeScreen> {
       
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Bookshelf'),
+          title: const Text('WebBooks Settings'),
           actions: [
             IconButton(
               tooltip: 'Activate license and select storage in Settings',
@@ -686,7 +686,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bookshelf'),
+        title: const Text('WebBooks'),
         actions: [
           IconButton(
             tooltip: _canSync()
@@ -761,7 +761,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     },
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 12),
                 IconButton(
                   tooltip: _searchEnabled ? 'Disable search' : 'Enable search',
                   icon: Icon(_searchEnabled ? Icons.close : Icons.search),
@@ -784,8 +784,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       ? Center(
                           child: Text(
                             _books.isEmpty
-                                ? 'No books found.'
-                                : 'No books with downloaded content.\nComplete sync to download.',
+                                ? 'No WebBooks found.'
+                                : 'No WebBooks with downloaded content.\nComplete sync to download.',
                             textAlign: TextAlign.center,
                           ),
                         )

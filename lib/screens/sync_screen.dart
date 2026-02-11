@@ -580,7 +580,7 @@ class _SyncScreenState extends State<SyncScreen> {
                               ElevatedButton.icon(
                                 onPressed: _closeOrGoToBookshelf,
                                 icon: const Icon(Icons.library_books),
-                                label: const Text('Go to Bookshelf', style: TextStyle(fontWeight: FontWeight.w600)),
+                                label: const Text('Go to WebBooks', style: TextStyle(fontWeight: FontWeight.w600)),
                                 style: ElevatedButton.styleFrom(
                                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                                 ),
@@ -630,7 +630,7 @@ class _SyncScreenState extends State<SyncScreen> {
                 child: ElevatedButton.icon(
                   onPressed: _closeOrGoToBookshelf,
                   icon: const Icon(Icons.library_books),
-                  label: const Text('Go to Bookshelf', style: TextStyle(fontWeight: FontWeight.w600)),
+                  label: const Text('Go to WebBooks', style: TextStyle(fontWeight: FontWeight.w600)),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
                     elevation: 6,

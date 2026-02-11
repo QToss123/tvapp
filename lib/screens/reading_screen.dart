@@ -971,11 +971,16 @@ class _ReadingScreenState extends State<ReadingScreen> {
             ? AppBar(
                 backgroundColor: Colors.black87,
                 elevation: 4,
-                leading: IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
-                  tooltip: 'Back',
-                  onPressed: () => Navigator.maybePop(context),
+                title: const Text(
+                  'Back to BookShelf',
+                  style: TextStyle(color: Colors.white), 
+                  fontSize: 12,
                 ),
+                // leading: IconButton(
+                //   icon: const Icon(Icons.arrow_back, color: Colors.white),
+                //   tooltip: 'Back',
+                //   onPressed: () => Navigator.maybePop(context),
+                // ),
               )
             : null,
         body: Stack(

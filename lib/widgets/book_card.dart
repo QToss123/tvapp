@@ -30,6 +30,8 @@ class _BookCardState extends State<BookCard> {
         builder: (context) {
           final hasFocus = Focus.of(context).hasFocus;
           final isHighlighted = hasFocus || widget.isFocused || _isHovered;
+          final cardWidth = _px(context, 120);
+          final cardHeight = _px(context, 180);
           return MouseRegion(
             onEnter: (_) => setState(() => _isHovered = true),
             onExit: (_) => setState(() => _isHovered = false),
@@ -51,99 +53,92 @@ class _BookCardState extends State<BookCard> {
                       ]
                     : null,
               ),
-              child: Card(
-                clipBehavior: Clip.antiAlias,
-                elevation: isHighlighted ? 8 : 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                color: Colors.grey.shade50,
-                child: InkWell(
-                  onTap: () {
-                    Navigator.pushNamed(
-                      context,
-                      AppRoutes.reading,
-                      arguments: widget.book,
-                    );
-                  },
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Thumbnail (same as sync screen)
-                      Expanded(
-                        flex: 3,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            ClipRect(
-                              child: _buildThumbnail(),
-                            ),
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              child: Container(
-                                height: _px(context, 20),
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      Colors.transparent,
-                                      Colors.black.withOpacity(0.6),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Title and progress section (same layout as sync screen)
-                      Expanded(
-                        flex: 2,
-                        child: Container(
-                          width: double.infinity,
-                          padding: EdgeInsets.symmetric(
-                            horizontal: _px(context, 4),
-                            vertical: _px(context, 3),
-                          ),
-                          color: Colors.white,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            mainAxisSize: MainAxisSize.min,
-                            mainAxisAlignment: MainAxisAlignment.center,
+              child: SizedBox(
+                width: cardWidth,
+                height: cardHeight,
+                child: Card(
+                  clipBehavior: Clip.antiAlias,
+                  elevation: isHighlighted ? 8 : 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  color: Colors.grey.shade50,
+                  child: InkWell(
+                    onTap: () {
+                      Navigator.pushNamed(
+                        context,
+                        AppRoutes.reading,
+                        arguments: widget.book,
+                      );
+                    },
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Thumbnail (same as sync screen)
+                        Expanded(
+                          flex: 3,
+                          child: Stack(
+                            fit: StackFit.expand,
                             children: [
-                              Expanded(
-                                child: Text(
-                                  widget.book.title,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: _fs(context, 11),
-                                    color: Colors.grey.shade900,
-                                    height: 1.2,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                ),
+                              ClipRect(
+                                child: _buildThumbnail(),
                               ),
-                              Text(
-                                widget.book.author,
-                                style: TextStyle(
-                                  fontSize: _fs(context, 10),
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.grey.shade700,
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                child: Container(
+                                  height: _px(context, 20),
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Colors.transparent,
+                                        Colors.black.withOpacity(0.6),
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
                               ),
                             ],
                           ),
                         ),
-                      ),
-                    ],
+                        // Title and progress section (same layout as sync screen)
+                        Expanded(
+                          flex: 2,
+                          child: Container(
+                            width: double.infinity,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: _px(context, 4),
+                              vertical: _px(context, 3),
+                            ),
+                            color: Colors.white,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    widget.book.title,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: _fs(context, 11),
+                                      color: Colors.grey.shade900,
+                                      height: 1.2,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -161,6 +156,7 @@ class _BookCardState extends State<BookCard> {
       return Image.file(
         file,
         fit: BoxFit.cover,
+        filterQuality: FilterQuality.high,
         errorBuilder: (_, __, ___) => _buildPlaceholderThumbnail(),
       );
     }
@@ -169,6 +165,7 @@ class _BookCardState extends State<BookCard> {
       return CachedNetworkImage(
         imageUrl: thumbUrl,
         fit: BoxFit.cover,
+        filterQuality: FilterQuality.high,
         placeholder: (_, __) => _buildPlaceholderThumbnail(),
         errorWidget: (_, __, ___) => _buildPlaceholderThumbnail(),
       );
