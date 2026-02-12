@@ -974,7 +974,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
                 title: const Text(
                   'Back to BookShelf',
                   style: TextStyle(color: Colors.white), 
-                  fontSize: 12,
                 ),
                 // leading: IconButton(
                 //   icon: const Icon(Icons.arrow_back, color: Colors.white),
