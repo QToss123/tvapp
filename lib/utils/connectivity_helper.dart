@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 
 /// Helper class for checking network connectivity
 class ConnectivityHelper {
@@ -16,11 +15,6 @@ class ConnectivityHelper {
           final result = await InternetAddress.lookup('google.com')
               .timeout(_attemptTimeout);
           if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
-            if (kDebugMode) {
-              debugPrint(attempt > 1
-                  ? '✅ Internet connection available (after retry)'
-                  : '✅ Internet connection available');
-            }
             return true;
           }
         } catch (e) {
@@ -28,13 +22,10 @@ class ConnectivityHelper {
             await Future.delayed(_retryDelay);
             continue;
           }
-          if (kDebugMode) debugPrint('❌ No internet connection: $e');
           return false;
         }
       }
     } catch (e, st) {
-      if (kDebugMode) debugPrint('❌ Connectivity check error: $e');
-      if (kDebugMode) debugPrint('$st');
       return false;
     }
     return false;
@@ -47,7 +38,6 @@ class ConnectivityHelper {
           .timeout(const Duration(seconds: 3));
       return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
     } catch (e) {
-      debugPrint('Cannot reach host $host: $e');
       return false;
     }
   }

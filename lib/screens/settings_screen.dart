@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path;
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -151,21 +150,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       // Step 2: Get token from validation response
       final token = validateResult['token'];
-      debugPrint('Token from validation result: ${token != null ? (token.toString().substring(0, 20) + '...') : 'NULL'}');
       
       if (token == null || token.toString().isEmpty) {
-        debugPrint('⚠️ WARNING: No token returned from validation response!');
-        debugPrint('Validation result keys: ${validateResult.keys}');
-        debugPrint('Full validation result: $validateResult');
         
         // Check if we have a stored token from previous activation
         final prefs = await SharedPreferences.getInstance();
         final existingToken = prefs.getString(_kLicenseToken);
         if (existingToken != null && existingToken.isNotEmpty) {
-          debugPrint('✅ Found existing token in storage, using it: ${existingToken.substring(0, 20)}...');
           // Continue with activation using existing token
         } else {
-          debugPrint('❌ No token found and no existing token in storage!');
           // No token returned - save license based on validation result
           final expiryDateStr = validateResult['expiryDate']?.toString() ?? '';
           await prefs.setString(_kLicenseNumber, licenseValue);
@@ -201,7 +194,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final tokenString = token?.toString();
       
       if (tokenString == null || tokenString.isEmpty) {
-        debugPrint('❌ ERROR: Cannot proceed - token is null or empty!');
         if (mounted) {
           Navigator.of(context).pop();
         }
@@ -219,14 +211,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       
       // Save the token
       await prefs.setString(_kLicenseToken, tokenString);
-      debugPrint('✅ Token saved after validation: ${tokenString.substring(0, 20)}...');
-      debugPrint('Token saved with key: $_kLicenseToken');
-      debugPrint('Verifying token was saved...');
       final verifyToken = prefs.getString(_kLicenseToken);
       if (verifyToken != null && verifyToken.isNotEmpty) {
-        debugPrint('✅ Token verification successful - token is in storage');
       } else {
-        debugPrint('❌ ERROR: Token verification failed - token not found after saving!');
       }
 
       // Step 4: Activate license with token
@@ -273,13 +260,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         await prefs.setBool(_kLicenseActivated, true);
         // Token was already saved after validation, but ensure it's still there
         await prefs.setString(_kLicenseToken, tokenString);
-        debugPrint('✅ Token confirmed saved after activation');
-        debugPrint('Final token verification...');
         final finalToken = prefs.getString(_kLicenseToken);
         if (finalToken != null && finalToken.isNotEmpty) {
-          debugPrint('✅ Final verification: Token exists in storage (${finalToken.substring(0, 20)}...)');
         } else {
-          debugPrint('❌ CRITICAL: Token missing after activation completion!');
         }
         
         setState(() {
@@ -470,7 +453,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (confirmed != true || !mounted) return;
 
-    debugPrint('🔄 Resetting all settings and deleting app data...');
 
     // 1. Delete books from storage location (courses and books folders)
     if (hasStorage) {
@@ -478,20 +460,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final coursesDir = Directory(path.join(storageLocation, 'courses'));
         if (await coursesDir.exists()) {
           await coursesDir.delete(recursive: true);
-          debugPrint('✅ Deleted courses folder: ${coursesDir.path}');
         }
         final booksDir = Directory(path.join(storageLocation, 'books'));
         if (await booksDir.exists()) {
           await booksDir.delete(recursive: true);
-          debugPrint('✅ Deleted books folder: ${booksDir.path}');
         }
         final thumbnailsDir = Directory(path.join(storageLocation, 'thumbnails'));
         if (await thumbnailsDir.exists()) {
           await thumbnailsDir.delete(recursive: true);
-          debugPrint('✅ Deleted thumbnails folder: ${thumbnailsDir.path}');
         }
       } catch (e) {
-        debugPrint('⚠️ Error deleting books from storage: $e');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -506,30 +484,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // 2. Clear local database and delete DB file
     try {
       final deletedCount = await DatabaseService.clearAllBooks();
-      debugPrint('✅ Cleared $deletedCount books from local database');
       await DatabaseService.close();
       final docDir = await getApplicationDocumentsDirectory();
       final dbFile = File(path.join(docDir.path, 'books.db'));
       if (await dbFile.exists()) {
         await dbFile.delete();
-        debugPrint('✅ Deleted database file');
       }
     } catch (e) {
-      debugPrint('❌ Error clearing database: $e');
     }
 
     // 3. Clear all caches and WebView storage
     try {
       await DefaultCacheManager().emptyCache();
-      debugPrint('✅ Cleared image cache (CachedNetworkImage)');
     } catch (e) {
-      debugPrint('⚠️ Error clearing image cache: $e');
     }
     try {
       await WebViewCookieManager().clearCookies();
-      debugPrint('✅ Cleared WebView cookies');
     } catch (e) {
-      debugPrint('⚠️ Error clearing WebView cookies: $e');
     }
     try {
       final tempDir = await getTemporaryDirectory();
@@ -537,7 +508,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final d = Directory(path.join(tempDir.path, dirName));
         if (await d.exists()) {
           await d.delete(recursive: true);
-          debugPrint('✅ Cleared $dirName cache');
         }
       }
       final cacheDir = await getApplicationCacheDirectory();
@@ -551,7 +521,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             }
           } catch (_) {}
         }
-        debugPrint('✅ Cleared application cache');
       }
       final supportDir = await getApplicationSupportDirectory();
       if (await supportDir.exists()) {
@@ -564,7 +533,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             }
           } catch (_) {}
         }
-        debugPrint('✅ Cleared application support (WebView storage)');
       }
       final docsDir = await getApplicationDocumentsDirectory();
       if (await docsDir.exists()) {
@@ -577,7 +545,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             }
           } catch (_) {}
         }
-        debugPrint('✅ Cleared application documents');
       }
       if (Platform.isWindows) {
         final localAppData = Platform.environment['LOCALAPPDATA'];
@@ -594,7 +561,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             final d = Directory(p);
             if (await d.exists()) {
               await d.delete(recursive: true);
-              debugPrint('✅ Cleared Windows app data: $p');
             }
           } catch (_) {}
         }
@@ -606,7 +572,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   path.basename(entity.path).startsWith('tv_app_books')) {
                 try {
                   await entity.delete(recursive: true);
-                  debugPrint('✅ Cleared temp app data: ${entity.path}');
                 } catch (_) {}
               }
             }
@@ -614,7 +579,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
     } catch (e) {
-      debugPrint('⚠️ Error clearing caches: $e');
     }
 
     // 4. Clear SharedPreferences (all app data)
@@ -629,7 +593,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _tvCursorEnabled = Platform.isAndroid;
     });
 
-    debugPrint('✅ Reset complete: all data, caches, and books deleted');
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -746,9 +709,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (storageChanged) {
       try {
         await DatabaseService.clearAllBooks();
-        debugPrint('📂 Cleared books: storage changed from "$oldStorage" to "$_storageLocation"');
       } catch (e) {
-        debugPrint('⚠️ Error clearing books on storage change: $e');
       }
     }
   }
@@ -894,7 +855,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
     } catch (e) {
-      debugPrint('File browser error: $e');
       // Fallback to manual input if file browser fails
       if (mounted) {
         _showManualPathInput();

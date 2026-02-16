@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'screens/splash_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
@@ -16,12 +15,9 @@ class AppRoutes {
 
   static final routes = <String, WidgetBuilder>{
     splash: (_) {
-      debugPrint('🗺️ [ROUTES] Building SplashScreen widget');
       return const SplashScreen();
     },
     home: (_) {
-      debugPrint('🗺️ [ROUTES] Building HomeScreen widget');
-      debugPrint('🗺️ [ROUTES] This creates a NEW HomeScreen instance');
       return const HomeScreen();
     },
     settings: (_) => const SettingsScreen(),

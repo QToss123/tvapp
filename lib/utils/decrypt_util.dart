@@ -55,7 +55,6 @@ Future<bool> isDecryptedFileAvailable({
   final exists = await f.exists();
   if (exists) {
     final len = await f.length();
-    debugPrint('🔐 [DECRYPT_UTIL] Decrypted file exists: $decPath ($len bytes)');
   }
   return exists;
 }
@@ -93,7 +92,6 @@ Future<DecryptResult> decryptBookFileIfNeeded({
   final alreadyDecrypted = await decryptedFile.exists();
   if (alreadyDecrypted) {
     final len = await decryptedFile.length();
-    debugPrint('🔐 [DECRYPT_UTIL] File already decrypted (reusing): $decryptedPath ($len bytes)');
     return DecryptResult(
       pathToUse: decryptedPath,
       wasDecrypted: true,
@@ -102,7 +100,6 @@ Future<DecryptResult> decryptBookFileIfNeeded({
     );
   }
 
-  debugPrint('🔐 [DECRYPT_UTIL] File not decrypted yet. Decrypting: $encryptedFilePath -> $decryptedPath');
   await BookDecryptionService.decryptFileOnDisk(
     encryptedFilePath: encryptedFilePath,
     bookId: encBookId!,
@@ -117,7 +114,6 @@ Future<DecryptResult> decryptBookFileIfNeeded({
     throw Exception('Decryption completed but decrypted file not found: $decryptedPath');
   }
   final decryptedSize = await verify.length();
-  debugPrint('🔐 [DECRYPT_UTIL] File decrypted: yes. Saved to $decryptedPath ($decryptedSize bytes)');
   return DecryptResult(
     pathToUse: decryptedPath,
     wasDecrypted: true,

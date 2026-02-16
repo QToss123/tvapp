@@ -21,7 +21,6 @@ void callbackDispatcher() {
       await _runBackgroundSync();
       return true;
     } catch (e) {
-      debugPrint('Background sync error: $e');
       return false;
     }
   });
@@ -53,7 +52,6 @@ Future<void> _runBackgroundSync() async {
       final existingPath = await DatabaseService.getFilePathByCourseId(courseId);
       if (existingPath != null && existingPath.isNotEmpty) {
         if (await File(existingPath).exists()) {
-          debugPrint('⏭️ Background sync: skipping already downloaded: $title');
           continue;
         }
       }
@@ -109,7 +107,6 @@ Future<void> _runBackgroundSync() async {
         filePath: finalPath,
       );
     } catch (e) {
-      debugPrint('Background sync book error: $e');
     }
   }
 

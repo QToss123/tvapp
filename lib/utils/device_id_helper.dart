@@ -22,7 +22,6 @@ class DeviceIdHelper {
         return _getFallbackDeviceId();
       }
     } catch (e) {
-      debugPrint('Error getting platform device ID: $e');
       return _getFallbackDeviceId();
     }
   }
@@ -31,17 +30,14 @@ class DeviceIdHelper {
     try {
       final id = await _channel.invokeMethod<String>('getDeviceId');
       if (id != null && id.isNotEmpty) {
-        debugPrint('📱 Android device ID (IMEI/androidId): $id');
         return id;
       }
     } catch (e) {
-      debugPrint('MethodChannel getDeviceId failed, using device_info: $e');
     }
     // Fallback: device_info_plus androidId
     final deviceInfo = DeviceInfoPlugin();
     final androidInfo = await deviceInfo.androidInfo;
     final androidId = androidInfo.id;
-    debugPrint('📱 Android device ID (androidId fallback): $androidId');
     return 'android_$androidId';
   }
 
@@ -53,7 +49,6 @@ class DeviceIdHelper {
     final id = mac != null && mac.isNotEmpty
         ? 'win_${deviceId}_$mac'
         : 'win_$deviceId';
-    debugPrint('📱 Windows device ID (deviceId + MAC): $id');
     return id;
   }
 
@@ -65,7 +60,6 @@ class DeviceIdHelper {
     final id = mac != null && mac.isNotEmpty
         ? 'linux_${machineId}_$mac'
         : 'linux_$machineId';
-    debugPrint('📱 Linux device ID (machineId + MAC): $id');
     return id;
   }
 
@@ -97,7 +91,6 @@ class DeviceIdHelper {
         return macs.isNotEmpty ? macs.first : null;
       }
     } catch (e) {
-      debugPrint('Error getting Windows MAC: $e');
     }
     return null;
   }
@@ -130,7 +123,6 @@ class DeviceIdHelper {
         }
       }
     } catch (e) {
-      debugPrint('Error getting Linux MAC: $e');
     }
     return null;
   }

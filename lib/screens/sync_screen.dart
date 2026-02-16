@@ -20,10 +20,9 @@ class SyncItem {
   final String? thumbnail;
   final String productName;
   final Map<String, dynamic> course;
-  String status; // pending | downloading | done | error | paused
+  String status; // pending | downloading | done | error
   int progress;  // 0-100
   bool selected; // for select/unselect
-  bool isPaused; // when true, download will abort (for pause support)
 
   SyncItem({
     required this.courseId,
@@ -34,7 +33,6 @@ class SyncItem {
     this.status = 'pending',
     this.progress = 0,
     this.selected = true,
-    this.isPaused = false,
   });
 }
 
@@ -108,14 +106,12 @@ class _SyncScreenState extends State<SyncScreen> {
   void _updateStatusFromItems() {
     final done = _syncItems.where((s) => s.status == 'done').length;
     final downloading = _syncItems.where((s) => s.status == 'downloading').length;
-    final paused = _syncItems.where((s) => s.status == 'paused').length;
     final error = _syncItems.where((s) => s.status == 'error').length;
     _downloadedBooks = done;
     final total = _syncItems.length;
-    if (downloading > 0 || paused > 0 || (done > 0 && done < total && !_syncComplete)) {
+    if (downloading > 0 || (done > 0 && done < total && !_syncComplete)) {
       final parts = <String>['$done done'];
       if (downloading > 0) parts.add('$downloading downloading');
-      if (paused > 0) parts.add('$paused paused');
       if (error > 0) parts.add('$error failed');
       _statusMessage = '${parts.join(', ')} ($total total)';
     }
@@ -136,7 +132,6 @@ class _SyncScreenState extends State<SyncScreen> {
       _isLoading = true;
       _statusMessage = 'Downloading ${selectedItems.length} book(s)...';
     });
-    await DatabaseService.logAllBooks();
     final futures = <Future<void>>[];
     for (int i = 0; i < _syncItems.length; i++) {
       if (_syncItems[i].selected) {
@@ -144,18 +139,14 @@ class _SyncScreenState extends State<SyncScreen> {
       }
     }
     await Future.wait(futures);
-    await DatabaseService.logAllBooks();
     final done = _syncItems.where((s) => s.status == 'done').length;
-    final paused = _syncItems.where((s) => s.status == 'paused').length;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('syncCompleted', true);
     if (!mounted) return;
     setState(() {
       _isLoading = false;
       _downloadedBooks = done;
-      _statusMessage = paused > 0
-          ? 'Sync complete! Downloaded $done/${_syncItems.length} books. $paused paused.'
-          : 'Sync complete! Downloaded $done/${_syncItems.length} books.';
+      _statusMessage = 'Sync complete! Downloaded $done/${_syncItems.length} books.';
       _syncComplete = true;
     });
   }
@@ -284,7 +275,6 @@ class _SyncScreenState extends State<SyncScreen> {
         );
       }
 
-      debugPrint('✅ Saved $_totalBooks courses to database');
 
       // Build sync items for UI (thumbnail, progress %, status)
       final items = <SyncItem>[];
@@ -317,7 +307,6 @@ class _SyncScreenState extends State<SyncScreen> {
       });
 
       // Auto-start downloads: list API → save to DB → download via download API
-      debugPrint('📥 Starting downloads for ${items.length} book(s)...');
       await _runDownloadsNow();
     } catch (e) {
       if (mounted) {
@@ -342,7 +331,6 @@ class _SyncScreenState extends State<SyncScreen> {
     if (filePath != null && filePath.isNotEmpty) {
       final file = File(filePath);
       if (await file.exists()) {
-        debugPrint('⏭️ Skipping already downloaded: ${item.title}');
         if (mounted) {
           setState(() {
             item.status = 'done';
@@ -368,24 +356,17 @@ class _SyncScreenState extends State<SyncScreen> {
     }
 
     try {
-      item.isPaused = false;
       update(status: 'downloading', progress: 0);
-      debugPrint('📥 Downloading course: courseId=$courseId, title="$title"');
 
       final downloadResult = await ApiService.downloadCourse(
         courseId,
         targetDirectory: storageLocation,
         onProgress: (p) => update(progress: p),
-        isCancelled: () => item.isPaused,
         checkExisting: (encId) => DatabaseService.getFilePathByEncBookId(encId),
       );
 
       if (downloadResult['success'] != true) {
-        if (downloadResult['cancelled'] == true) {
-          update(status: 'paused');
-        } else {
-          update(status: 'error');
-        }
+        update(status: 'error');
         return;
       }
 
@@ -395,9 +376,6 @@ class _SyncScreenState extends State<SyncScreen> {
       final encBookId = downloadResult['encBookId'] as String?;
       final encKeyB64 = downloadResult['encKeyB64'] as String?;
       final encNonceB64 = downloadResult['encNonceB64'] as String?;
-      debugPrint('🔐 [SYNC] enc keys from API: bookId=$encBookId '
-          'keyEncB64=${encKeyB64 != null ? '***' : 'null'} '
-          'keyNonceB64=${encNonceB64 != null ? '***' : 'null'}');
 
       final encBookPath = downloadResult['encBookPath'] as String?;
       final thumb = course['thumbnail']?.toString() ?? course['product_thumbnail']?.toString();
@@ -430,9 +408,7 @@ class _SyncScreenState extends State<SyncScreen> {
 
       await DatabaseService.insertBook(book, courseId: courseId, filePath: finalPath);
       update(status: 'done', progress: 100);
-      debugPrint('✅ Downloaded: $title');
     } catch (e) {
-      debugPrint('Error downloading book $title: $e');
       update(status: 'error');
     }
   }
@@ -607,16 +583,7 @@ class _SyncScreenState extends State<SyncScreen> {
                                   item.selected = selected;
                                 });
                               },
-                              onPause: item.status == 'downloading'
-                                  ? () {
-                                      if (!mounted) return;
-                                      setState(() {
-                                        item.isPaused = true;
-                                      });
-                                    }
-                                  : null,
-                              onResume: (item.status == 'error' || item.status == 'paused') &&
-                                      _storageLocationForSync != null
+                              onRetry: item.status == 'error' && _storageLocationForSync != null
                                   ? () => _downloadOneCourse(i, _storageLocationForSync!)
                                   : null,
                             );
@@ -719,14 +686,12 @@ class _SyncScreenState extends State<SyncScreen> {
 class _SyncItemGridTile extends StatelessWidget {
   final SyncItem item;
   final ValueChanged<bool>? onSelectChanged;
-  final VoidCallback? onPause;
-  final VoidCallback? onResume;
+  final VoidCallback? onRetry;
 
   const _SyncItemGridTile({
     required this.item,
     this.onSelectChanged,
-    this.onPause,
-    this.onResume,
+    this.onRetry,
   });
 
   bool _isTv(BuildContext context) => MediaQuery.sizeOf(context).width >= 600;
@@ -741,16 +706,13 @@ class _SyncItemGridTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDone = item.status == 'done';
     final isError = item.status == 'error';
-    final isPaused = item.status == 'paused';
     final isDownloading = item.status == 'downloading';
     final tv = _isTv(context);
     final statusColor = isError
         ? Colors.red
-        : isPaused
-            ? Colors.orange
-            : isDone
-                ? Colors.green
-                : Colors.blue;
+        : isDone
+            ? Colors.green
+            : Colors.blue;
 
     return Focus(
       child: Builder(
@@ -880,7 +842,7 @@ class _SyncItemGridTile extends StatelessWidget {
                           ),
                           SizedBox(height: _px(context, 2)),
                           LinearProgressIndicator(
-                            value: isDone || isError || isPaused
+                            value: isDone || isError
                                 ? (isDone ? 1.0 : (item.progress / 100).clamp(0.0, 1.0))
                                 : (item.progress / 100).clamp(0.0, 1.0),
                             minHeight: 3,
@@ -898,9 +860,7 @@ class _SyncItemGridTile extends StatelessWidget {
                                       ? 'Done'
                                       : isError
                                           ? 'Error'
-                                          : isPaused
-                                              ? '${item.progress}%'
-                                              : '${item.progress}%',
+                                          : '${item.progress}%',
                                   style: TextStyle(
                                     fontSize: _fs(context, 10),
                                     fontWeight: FontWeight.w600,
@@ -909,20 +869,11 @@ class _SyncItemGridTile extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              if (isDownloading && onPause != null)
+                              if (isError && onRetry != null)
                                 IconButton(
-                                  icon: const Icon(Icons.pause_circle),
-                                  iconSize: _fs(context, 18),
-                                  tooltip: 'Pause',
-                                  onPressed: onPause,
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                )
-                              else if ((isError || isPaused) && onResume != null)
-                                IconButton(
-                                  icon: Icon(isPaused ? Icons.play_circle : Icons.refresh, size: _fs(context, 18)),
-                                  tooltip: isPaused ? 'Resume' : 'Retry',
-                                  onPressed: onResume,
+                                  icon: Icon(Icons.refresh, size: _fs(context, 18)),
+                                  tooltip: 'Retry',
+                                  onPressed: onRetry,
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                                 ),

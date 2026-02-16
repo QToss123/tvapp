@@ -87,34 +87,27 @@ class BookDecryptionService {
     required String targetFilePath,
     void Function(double progress)? onProgress,
   }) async {
-    debugPrint('🔐 Downloading encrypted book...');
     final tempPath = await _downloadToFile(downloadUrl, onProgress);
     final tempFile = File(tempPath);
     final encryptedLength = await tempFile.length();
-    debugPrint('🔐 Downloaded $encryptedLength bytes to temp file');
 
-    debugPrint('🔐 Decrypting content key...');
     final contentKey = await _decryptContentKey(
       keyEncB64: keyEncB64,
       keyNonceB64: keyNonceB64,
       bookId: bookId,
     );
-    debugPrint('🔐 Content key decrypted');
 
-    debugPrint('🔐 Decrypting file content...');
     final encryptedBytes = await tempFile.readAsBytes();
     try {
       final decryptedBytes = await _decryptFileContent(
         encryptedData: encryptedBytes,
         contentKey: contentKey,
       );
-      debugPrint('🔐 File decrypted: ${decryptedBytes.length} bytes');
 
       final file = File(targetFilePath);
       await file.parent.create(recursive: true);
       if (await file.exists()) await file.delete();
       await file.writeAsBytes(decryptedBytes);
-      debugPrint('🔐 Saved to: $targetFilePath');
       return targetFilePath;
     } finally {
       try {
@@ -133,40 +126,32 @@ class BookDecryptionService {
     required String outputFilePath,
   }) async {
     try {
-      debugPrint('🔐 Decrypting encrypted file on disk: $encryptedFilePath');
       final encryptedFile = File(encryptedFilePath);
       if (!await encryptedFile.exists()) {
         throw Exception('Encrypted file not found: $encryptedFilePath');
       }
 
-      debugPrint('🔐 Reading encrypted file...');
       final encryptedBytes = await encryptedFile.readAsBytes();
-      debugPrint('🔐 Encrypted file size: ${encryptedBytes.length} bytes');
 
       final contentKey = await _decryptContentKey(
         keyEncB64: keyEncB64,
         keyNonceB64: keyNonceB64,
         bookId: bookId,
       );
-      debugPrint('🔐 Content key decrypted (32 bytes)');
 
-      debugPrint('🔐 Decrypting file content (native AES-GCM)...');
       final stopwatch = Stopwatch()..start();
       final decryptedBytes = await _decryptFileContent(
         encryptedData: encryptedBytes,
         contentKey: contentKey,
       );
       stopwatch.stop();
-      debugPrint('🔐 Decrypted ${decryptedBytes.length} bytes in ${stopwatch.elapsedMilliseconds} ms');
 
       final outFile = File(outputFilePath);
       await outFile.parent.create(recursive: true);
       if (await outFile.exists()) await outFile.delete();
       await outFile.writeAsBytes(decryptedBytes);
-      debugPrint('🔐 Decrypted file saved to: $outputFilePath');
       return outputFilePath;
     } catch (e, st) {
-      debugPrint('🔐 decryptFileOnDisk error: $e\n$st');
       if (e is Exception) rethrow;
       throw Exception('Decryption failed: $e');
     }
@@ -210,8 +195,6 @@ class BookDecryptionService {
     required String bookId,
   }) async {
     try {
-      debugPrint('🔐 Using master key (b64): $_masterKeyB64');
-      debugPrint('🔐 keyEncB64 length: ${keyEncB64.length}, keyNonceB64 length: ${keyNonceB64.length}');
       final masterKey = base64.decode(_masterKeyB64);
       final encryptedKey = base64.decode(keyEncB64);
       final nonce = base64.decode(keyNonceB64);
@@ -245,7 +228,6 @@ class BookDecryptionService {
       }
       return Uint8List.fromList(decrypted);
     } catch (e, st) {
-      debugPrint('🔐 _decryptContentKey error: $e\n$st');
       if (e is Exception) rethrow;
       throw Exception('Content key decryption failed: $e');
     }
@@ -273,7 +255,6 @@ class BookDecryptionService {
       );
       return Uint8List.fromList(decrypted);
     } catch (e, st) {
-      debugPrint('🔐 _decryptFileContent error: $e\n$st');
       if (e is Exception) rethrow;
       throw Exception('File decryption failed: $e');
     }

@@ -149,28 +149,23 @@ class DatabaseService {
       );
       if (existing.isNotEmpty) {
         // Update existing book
-        debugPrint('📝 Updating book in database: courseId=$courseId, title="${book.title}", filePath=$filePath');
         final rowsAffected = await db.update(
           _tableBooks,
           bookMap,
           where: '$_colCourseId = ?',
           whereArgs: [courseId],
         );
-        debugPrint('✅ Updated $rowsAffected row(s) for courseId=$courseId');
         return rowsAffected;
       }
     }
 
-    debugPrint('➕ Inserting new book: courseId=$courseId, title="${book.title}", filePath=$filePath');
     final id = await db.insert(_tableBooks, bookMap);
-    debugPrint('✅ Inserted book with id=$id');
     return id;
   }
 
   /// Gets all books from the database
   static Future<List<Book>> getAllBooks() async {
     try {
-      debugPrint('🔍 [DATABASE] Starting getAllBooks() query...');
       final db = await database;
       
       final List<Map<String, dynamic>> maps = await db.query(
@@ -178,10 +173,8 @@ class DatabaseService {
         orderBy: '$_colCreatedAt DESC',
       );
 
-      debugPrint('📚 [DATABASE] getAllBooks: Found ${maps.length} books in database');
       
       if (maps.isEmpty) {
-        debugPrint('⚠️ [DATABASE] No books found in database! Table might be empty.');
         return [];
       }
 
@@ -203,17 +196,6 @@ class DatabaseService {
         final encKeyB64 = maps[i][_colEncKeyB64];
         final encNonceB64 = maps[i][_colEncNonceB64];
         
-        debugPrint('📖 [DATABASE] Book $i:');
-        debugPrint('   - courseId: $courseId');
-        debugPrint('   - title: "$title"');
-        debugPrint('   - author: "$author"');
-        debugPrint('   - thumbnail: $thumbnail');
-        debugPrint('   - filePath (raw): $filePath');
-        debugPrint('   - contentUrl (raw): $contentUrlRaw');
-        debugPrint('   - final contentUrl: $contentUrl');
-        debugPrint('   - encBookId: $encBookId');
-        debugPrint('   - encKeyB64: ${encKeyB64 != null ? '***' : 'null'}');
-        debugPrint('   - encNonceB64: ${encNonceB64 != null ? '***' : 'null'}');
         
         // Ensure file:// protocol for local files
         if (contentUrl != null && 
@@ -227,7 +209,6 @@ class DatabaseService {
           } else {
             contentUrl = 'file:///$contentUrl';
           }
-          debugPrint('   - contentUrl (after protocol fix): $contentUrl');
         }
         
         return Book(
@@ -244,11 +225,8 @@ class DatabaseService {
         );
       });
 
-      debugPrint('✅ [DATABASE] getAllBooks: Successfully converted ${books.length} books');
       return books;
     } catch (e, stackTrace) {
-      debugPrint('❌ [DATABASE] Error in getAllBooks: $e');
-      debugPrint('Stack trace: $stackTrace');
       return [];
     }
   }
@@ -256,7 +234,6 @@ class DatabaseService {
   /// Gets books by search query
   static Future<List<Book>> searchBooks(String query) async {
     try {
-      debugPrint('🔍 [DATABASE] Starting searchBooks() query: "$query"');
       final db = await database;
       final searchTerm = '%$query%';
       
@@ -267,10 +244,8 @@ class DatabaseService {
         orderBy: '$_colCreatedAt DESC',
       );
 
-      debugPrint('📚 [DATABASE] searchBooks: Found ${maps.length} books matching "$query"');
       
       if (maps.isEmpty) {
-        debugPrint('⚠️ [DATABASE] No books found matching search query: "$query"');
         return [];
       }
 
@@ -285,7 +260,6 @@ class DatabaseService {
         final encNonceB64 = maps[i][_colEncNonceB64];
         
         final title = maps[i][_colTitle] ?? 'Untitled';
-        debugPrint('📖 [DATABASE] Search result $i: "$title"');
         
         // Ensure file:// protocol for local files
         if (contentUrl != null && 
@@ -315,8 +289,6 @@ class DatabaseService {
         );
       });
     } catch (e, stackTrace) {
-      debugPrint('❌ [DATABASE] Error in searchBooks: $e');
-      debugPrint('Stack trace: $stackTrace');
       return [];
     }
   }
@@ -490,21 +462,6 @@ class DatabaseService {
     );
   }
 
-  /// Logs all rows in the books table (for debugging)
-  static Future<void> logAllBooks() async {
-    try {
-      final db = await database;
-      final rows = await db.query(_tableBooks, orderBy: '$_colCreatedAt DESC');
-      debugPrint('📋 [DATABASE] books table: ${rows.length} row(s)');
-      for (int i = 0; i < rows.length; i++) {
-        final row = rows[i];
-        debugPrint('Row $i: ${row.toString()}');
-      }
-    } catch (e) {
-      debugPrint('❌ [DATABASE] Failed to log books table: $e');
-    }
-  }
-
   /// Updates book progress
   static Future<int> updateBookProgress(String contentUrl, int progress) async {
     final db = await database;
@@ -543,20 +500,13 @@ class DatabaseService {
   /// Returns a map with status information
   static Future<Map<String, dynamic>> checkDatabaseStatus() async {
     try {
-      debugPrint('🔍 [DATABASE] ========== DATABASE STATUS CHECK ==========');
       
       final db = await database;
       
       // Get book count
       final count = await getBookCount();
-      debugPrint('📊 [DATABASE] Total books in database: $count');
       
       if (count == 0) {
-        debugPrint('⚠️ [DATABASE] Database is EMPTY - No books found!');
-        debugPrint('📋 [DATABASE] This means:');
-        debugPrint('   1. No sync has been performed yet');
-        debugPrint('   2. Books were not saved during sync');
-        debugPrint('   3. Database was cleared/reset');
         return {
           'hasData': false,
           'bookCount': 0,
@@ -570,7 +520,6 @@ class DatabaseService {
         orderBy: '$_colCreatedAt DESC',
       );
       
-      debugPrint('📚 [DATABASE] Detailed book information:');
       final List<Map<String, dynamic>> booksInfo = [];
       
       for (int i = 0; i < allBooks.length; i++) {
@@ -587,35 +536,7 @@ class DatabaseService {
         };
         booksInfo.add(bookInfo);
         
-        debugPrint('   Book ${i + 1}:');
-        debugPrint('     - ID: ${book[_colId]}');
-        debugPrint('     - Course ID: ${book[_colCourseId]}');
-        debugPrint('     - Title: "${book[_colTitle]}"');
-        debugPrint('     - Author: "${book[_colAuthor]}"');
-        debugPrint('     - File Path: ${book[_colFilePath] ?? "NULL"}');
-        debugPrint('     - Content URL: ${book[_colContentUrl] ?? "NULL"}');
-        debugPrint('     - Thumbnail: ${book[_colThumbnail] ?? "NULL"}');
-        debugPrint('     - Progress: ${book[_colProgress] ?? 0}%');
-        debugPrint('     - Created: ${book[_colCreatedAt]}');
-        debugPrint('     - Synced: ${book[_colSyncedAt] ?? "NULL"}');
         
-        // Check if file path exists
-        if (book[_colFilePath] != null && book[_colFilePath].toString().isNotEmpty) {
-          try {
-            final filePath = book[_colFilePath] as String;
-            final file = File(filePath);
-            final exists = await file.exists();
-            debugPrint('     - File exists: $exists');
-            if (!exists) {
-              debugPrint('     ⚠️ File not found at path: $filePath');
-            }
-          } catch (e) {
-            debugPrint('     ⚠️ Error checking file: $e');
-          }
-        } else {
-          debugPrint('     ⚠️ No file path stored for this book');
-        }
-        debugPrint('');
       }
       
       // Count books with/without file paths
@@ -625,11 +546,7 @@ class DatabaseService {
       ).length;
       final withoutPaths = count - withPaths;
       
-      debugPrint('📈 [DATABASE] Statistics:');
-      debugPrint('   - Books with file paths: $withPaths');
-      debugPrint('   - Books without file paths: $withoutPaths');
       
-      debugPrint('✅ [DATABASE] ========== STATUS CHECK COMPLETE ==========');
       
       return {
         'hasData': true,
@@ -639,8 +556,6 @@ class DatabaseService {
         'books': booksInfo,
       };
     } catch (e, stackTrace) {
-      debugPrint('❌ [DATABASE] Error checking database status: $e');
-      debugPrint('Stack trace: $stackTrace');
       return {
         'hasData': false,
         'error': e.toString(),
@@ -655,7 +570,6 @@ class DatabaseService {
     try {
       final directory = Directory(folderPath);
       if (!await directory.exists()) {
-        debugPrint('Directory does not exist: $folderPath');
         return books;
       }
 
@@ -693,7 +607,6 @@ class DatabaseService {
         }
       }
     } catch (e) {
-      debugPrint('Error scanning folder: $e');
     }
     
     return books;

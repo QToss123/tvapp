@@ -32,7 +32,6 @@ class _HomeScreenState extends State<HomeScreen> {
   
   // Constructor/initialization logging
   _HomeScreenState() {
-    debugPrint('🏗️ [HOME] HomeScreenState CONSTRUCTOR called - Widget instance created!');
   }
   
   // Dummy books data - fallback for testing
@@ -228,14 +227,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    debugPrint('');
-    debugPrint('🚀 [HOME] ===========================================');
-    debugPrint('🚀 [HOME] ========== initState() CALLED ==========');
-    debugPrint('🚀 [HOME] ===========================================');
-    debugPrint('🚀 [HOME] HomeScreen widget is being initialized');
-    debugPrint('🚀 [HOME] Hash code: ${hashCode}');
-    debugPrint('🚀 [HOME] Calling _checkLicenseStatus()...');
-    debugPrint('');
     _checkLicenseStatus();
     _checkConnectivity();
     // Check every 30s (was 6s) to avoid repeated DNS lookups and release APK issues
@@ -250,7 +241,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e, st) {
       if (kDebugMode) {
-        debugPrint('Connectivity check failed: $e\n$st');
       }
       if (mounted) {
         setState(() => _hasInternet = false);
@@ -262,7 +252,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _connectivityTimer?.cancel();
     _connectivityTimer = null;
-    debugPrint('🗑️ [HOME] dispose() called - HomeScreen widget destroyed');
     _searchFocusNode.dispose();
     super.dispose();
   }
@@ -311,25 +300,14 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       // Load books from local database
-      debugPrint('🏠 [HOME] Starting to load books from database...');
-      debugPrint('🏠 [HOME] License activated: $_isLicenseActivated');
-      debugPrint('🏠 [HOME] Storage connected: $storageConnected');
       
       final books = await DatabaseService.getAllBooks();
       
-      debugPrint('🏠 [HOME] Loaded ${books.length} books from database');
       
       if (books.isEmpty) {
-        debugPrint('⚠️ [HOME] No books returned from database!');
-        debugPrint('⚠️ [HOME] This could mean:');
-        debugPrint('   1. Database is empty');
-        debugPrint('   2. Books were not saved during sync');
-        debugPrint('   3. Database query failed');
       } else {
-        debugPrint('✅ [HOME] Books loaded successfully:');
         for (int i = 0; i < books.length; i++) {
           final hasUrl = books[i].contentUrl != null && books[i].contentUrl!.isNotEmpty;
-          debugPrint('   $i. "${books[i].title}" by ${books[i].author} contentUrl: ${hasUrl ? "yes" : "NO"}');
         }
       }
       
@@ -339,11 +317,8 @@ class _HomeScreenState extends State<HomeScreen> {
           _isStorageConnected = true;
           _isLoadingBooks = false;
         });
-        debugPrint('🏠 [HOME] State updated with ${_books.length} books');
       }
     } catch (e, stackTrace) {
-      debugPrint('❌ [HOME] Error loading books from database: $e');
-      debugPrint('Stack trace: $stackTrace');
       // Use empty list on error
       if (mounted) {
         setState(() {
@@ -372,27 +347,22 @@ class _HomeScreenState extends State<HomeScreen> {
       
       // Check if directory exists
       if (!await storageDir.exists()) {
-        debugPrint('Storage device not found: $storageLocation');
         return false;
       }
       
       // Try to list directory to verify accessibility
       try {
         await storageDir.list().first.timeout(const Duration(milliseconds: 1000));
-        debugPrint('Storage device is accessible: $storageLocation');
         return true;
       } catch (e) {
-        debugPrint('Cannot access storage device: $e');
         return false;
       }
     } catch (e) {
-      debugPrint('Error checking storage device: $e');
       return false;
     }
   }
 
   Future<void> _checkLicenseStatus() async {
-    debugPrint('🔑 [HOME] Checking license status on app start/relaunch...');
     
     final prefs = await SharedPreferences.getInstance();
     final licenseNumber = prefs.getString('licenseNumber') ?? '';
@@ -400,17 +370,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final expiryDateStr = prefs.getString('licenseExpiryDate') ?? '';
     final syncCompleted = prefs.getBool('syncCompleted') ?? false;
     
-    debugPrint('🔑 [HOME] License info:');
-    debugPrint('   - License Number: ${licenseNumber.isEmpty ? "NOT SET" : licenseNumber}');
-    debugPrint('   - Activated: $isActivated');
-    debugPrint('   - Expiry Date: ${expiryDateStr.isEmpty ? "NOT SET" : expiryDateStr}');
-    debugPrint('   - Sync Completed: $syncCompleted');
     
     // Check database status regardless of license
-    debugPrint('');
-    debugPrint('📊 [HOME] Checking database status...');
     await DatabaseService.checkDatabaseStatus();
-    debugPrint('');
     
     bool isValid = false;
     String? statusMessage;
@@ -447,12 +409,10 @@ class _HomeScreenState extends State<HomeScreen> {
             statusMessage = 'Your license has expired. Please renew your license.';
           }
         } catch (e) {
-          debugPrint('⚠️ [HOME] Invalid expiry date format: $expiryDateStr, error: $e');
           // Invalid date format - but don't block access, just log warning
           // Continue with validation
         }
       } else {
-        debugPrint('⚠️ [HOME] Expiry date not set, but license is activated. Allowing access.');
         // Expiry date not set - don't block access, just allow it
         // This can happen if activation API didn't return expiry date
       }
@@ -474,12 +434,8 @@ class _HomeScreenState extends State<HomeScreen> {
       statusMessage = licenseNumber.isEmpty
           ? 'Please activate your license in Settings.'
           : null;
-      debugPrint('⚠️ [HOME] License not activated: licenseNumber="${licenseNumber.isEmpty ? "EMPTY" : licenseNumber}", isActivated=$isActivated');
     }
     
-    debugPrint('🔑 [HOME] License check result:');
-    debugPrint('   - Is Valid: $isValid');
-    debugPrint('   - Status Message: ${statusMessage ?? "None"}');
     
     setState(() {
       _isLicenseActivated = isValid;
@@ -489,17 +445,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Load books from database if license is activated AND sync is completed
     if (isValid && syncCompleted) {
-      debugPrint('✅ [HOME] License valid and sync completed, loading books...');
       _loadBooks();
     } else {
-      debugPrint('⚠️ [HOME] Cannot load books - License valid: $isValid, Sync completed: $syncCompleted');
       // Clear books if license is not valid or sync not completed
       setState(() {
         _books = [];
       });
     }
     
-    debugPrint('🚀 [HOME] ========== INIT COMPLETE ==========');
   }
 
   bool _canSync() {
@@ -742,20 +695,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       setState(() => _query = v);
                       if (v.isNotEmpty) {
                         // Search in database
-                        debugPrint('🔍 [HOME] Searching for: "$v"');
                         try {
                           final filtered = await DatabaseService.searchBooks(v);
-                          debugPrint('🔍 [HOME] Search returned ${filtered.length} results');
                           setState(() {
                             _books = filtered;
                           });
                         } catch (e) {
-                          debugPrint('❌ [HOME] Search error: $e');
                           // Keep current books on error
                         }
                       } else {
                         // Reload all books
-                        debugPrint('🔍 [HOME] Search cleared, reloading all books');
                         _loadBooks();
                       }
                     },

@@ -10,7 +10,6 @@ import '../models/book.dart';
 import '../utils/zip_handler.dart';
 import '../services/database_service.dart';
 import '../utils/decrypt_util.dart';
-import 'package:flutter/foundation.dart';
 
 /// Intent for TV remote key directions
 class DirectionIntent extends Intent {
@@ -92,10 +91,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
         final f = File(_decryptedCachePath!);
         if (f.existsSync()) {
           f.deleteSync();
-          debugPrint('🧹 [READING] Deleted decrypted cache file: $_decryptedCachePath');
         }
       } catch (e) {
-        debugPrint('⚠️ [READING] Failed to delete decrypted cache file: $e');
       }
     }
     // Dispose focus node
@@ -109,7 +106,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
     Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted && _webViewFocusNode.canRequestFocus) {
         _webViewFocusNode.requestFocus();
-        debugPrint('🎮 [READING] WebView focus requested for TV remote navigation');
       }
     });
   }
@@ -119,7 +115,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
   /// Shortcut: Left/Right also trigger prev/next when cursor is over reader area (optional).
   Future<void> _sendKeyToWeb(String direction) async {
     try {
-      debugPrint('🎮 [READING] Sending key to WebView: $direction');
       
       String jsCode;
       if (direction == 'enter') {
@@ -132,7 +127,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       
       await _controller.runJavaScript(jsCode);
     } catch (e) {
-      debugPrint('❌ [READING] Error sending key to WebView: $e');
     }
   }
 
@@ -186,7 +180,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       ''';
       await _controller.runJavaScript(js);
     } catch (e) {
-      debugPrint('❌ [READING] Error scrolling WebView: $e');
     }
   }
 
@@ -222,9 +215,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         })();
       ''';
       await _controller.runJavaScript(jsCode);
-      debugPrint('✅ [READING] Book fixes (page-jump, responsive) injected');
     } catch (e) {
-      debugPrint('⚠️ [READING] Error injecting book fixes: $e');
     }
   }
 
@@ -277,9 +268,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         })();
       ''';
       await _controller.runJavaScript(jsCode);
-      debugPrint('✅ [READING] TV cursor and keyboard navigation enabled');
     } catch (e) {
-      debugPrint('⚠️ [READING] Error enabling keyboard navigation: $e');
     }
   }
 
@@ -287,12 +276,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
   Future<void> _stopLocalServer() async {
     if (_localServer != null) {
       try {
-        debugPrint('🛑 [READING] Stopping local HTTP server on port $_serverPort...');
         await _localServer!.close(force: true);
         _localServer = null;
-        debugPrint('✅ [READING] Local HTTP server stopped');
       } catch (e) {
-        debugPrint('⚠️ [READING] Error stopping local server: $e');
       }
     }
   }
@@ -306,7 +292,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       ..addJavaScriptChannel(
         'FlutterChannel',
         onMessageReceived: (JavaScriptMessage message) {
-          debugPrint('JavaScript message: ${message.message}');
         },
       )
       ..setNavigationDelegate(
@@ -336,7 +321,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
               if (Platform.isLinux &&
                   fallback != null &&
                   (errUrl == null || errUrl.isEmpty || errUrl.startsWith('file://'))) {
-                debugPrint('⚠️ [READING] file:// failed on Linux, retrying with HTTP...');
                 _linuxHttpFallbackUrl = null;
                 if (mounted) {
                   _controller.loadRequest(Uri.parse(fallback));
@@ -350,7 +334,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
                 });
               }
             } else {
-              debugPrint('Resource load error (non-critical): ${error.url} - ${error.description}');
             }
           },
         ),
@@ -361,30 +344,23 @@ class _ReadingScreenState extends State<ReadingScreen> {
       final originalUrl = widget.book.contentUrl!;
       final contentUrl = _normalizeContentUrl(originalUrl);
       
-      debugPrint('Original contentUrl: $originalUrl');
-      debugPrint('Normalized contentUrl: $contentUrl');
       
       // Check if it's a local asset (starts with 'assets/')
       if (contentUrl.startsWith('assets/')) {
-        debugPrint('Loading as asset: $contentUrl');
         _loadAsset(contentUrl);
       } else if (contentUrl.startsWith('file://')) {
         // Local file system (including external storage like USB drives)
-        debugPrint('Loading as file: $contentUrl');
         _loadFile(contentUrl);
       } else if (contentUrl.startsWith('http://') || contentUrl.startsWith('https://')) {
         // Network URL
-        debugPrint('Loading as network URL: $contentUrl');
         _controller.loadRequest(Uri.parse(contentUrl));
       } else {
         // Try as asset first, then as network URL
-        debugPrint('Trying as asset: $contentUrl');
         _loadAsset(contentUrl);
       }
     } else {
       // No contentUrl (e.g. book not downloaded yet). Avoid loadHtmlString - it
       // uses loadDataWithBaseURL which crashes on some Android TV WebViews (MiTV etc).
-      debugPrint('No contentUrl provided, showing error (avoiding loadHtmlString)');
       _controller.loadRequest(Uri.parse('about:blank'));
       setState(() {
         _isLoading = false;
@@ -429,21 +405,17 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
   Future<void> _loadAsset(String assetPath) async {
     await _loadTvCursorSetting();
-    debugPrint('Loading asset: $assetPath');
     try {
       // Load HTML as string to inject base tag for proper relative resource resolution
       // This ensures CSS, JS (including PDF.js), and other resources load correctly
-      debugPrint('Loading HTML content: $assetPath');
       final String htmlContent = await DefaultAssetBundle.of(context)
           .loadString(assetPath);
-      debugPrint('Successfully loaded HTML content (${htmlContent.length} chars)');
       
       // Extract base path for relative resources (directory containing the file)
       final basePath = assetPath.contains('/') 
           ? assetPath.substring(0, assetPath.lastIndexOf('/') + 1)
           : '';
       
-      debugPrint('Base path: $basePath');
       
       // Inject base tag into HTML to ensure relative resources load correctly
       // This is critical for PDF.js, CSS, and other JS files to load
@@ -459,12 +431,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
           modifiedHtml = modifiedHtml.substring(0, insertIndex) +
               '\n    <base href="$baseHref">' +
               modifiedHtml.substring(insertIndex);
-          debugPrint('Injected base tag with href: $baseHref');
         } else {
-          debugPrint('Warning: <head> tag not found, cannot inject base tag');
         }
       } else {
-        debugPrint('Base tag already exists in HTML');
       }
       
       // Load HTML with base URL for relative resources
@@ -473,19 +442,16 @@ class _ReadingScreenState extends State<ReadingScreen> {
           ? 'file:///android_asset/flutter_assets/$basePath'
           : 'file:///android_asset/flutter_assets/';
       
-      debugPrint('Loading with base URL: $baseUrl');
       
       await _controller.loadHtmlString(
         modifiedHtml,
         baseUrl: baseUrl,
       );
       
-      debugPrint('Successfully loaded HTML with base URL - CSS/JS should now load correctly');
       setState(() {
         _isLoading = false;
       });
     } catch (e) {
-      debugPrint('Failed to load asset: $e');
       setState(() {
         _isLoading = false;
         _error = 'This file could not be opened.';
@@ -585,7 +551,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
     try {
       await _loadTvCursorSetting();
-      debugPrint('📂 [READING] Loading file from external storage: $fileUrl');
 
       // Parse file:// URL to native path (Windows: /D:/path -> D:\path)
       var filePath = _fileUrlToPath(fileUrl);
@@ -598,7 +563,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       // Log encrypted file existence on open (both success and failure)
       final isZip = filePath.toLowerCase().endsWith('.zip');
       if (isZip) {
-        debugPrint('🔎 [READING] Encrypted file check: path=$filePath exists=$fileExists');
       }
 
       if (!fileExists) {
@@ -616,9 +580,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
       final encKeyB64 = dbBook?.encKeyB64 ?? widget.book.encKeyB64;
       final encNonceB64 = dbBook?.encNonceB64 ?? widget.book.encNonceB64;
       if (dbBook != null) {
-        debugPrint('🔐 [READING] Using enc keys from local DB for file: $filePath');
       } else {
-        debugPrint('🔐 [READING] DB lookup not found, using widget book keys');
       }
 
       // If encrypted metadata exists, decrypt via util (on book click), then unzip/open extracted location
@@ -630,7 +592,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
           encryptedFilePath: filePath,
           encBookId: encBookId ?? '',
         );
-        debugPrint('🔐 [READING] Decrypted file available before decrypt: $decryptedAvailable');
 
         await updateDialog(
           stepKey: 'Decrypting',
@@ -649,20 +610,17 @@ class _ReadingScreenState extends State<ReadingScreen> {
           final decryptedSize = await file.length();
 
           if (result.reusedExisting) {
-            debugPrint('🔐 [READING] File decrypted: yes (reused existing, $decryptedSize bytes)');
             await updateDialog(
               stepKey: 'Decrypting',
               message: 'Decrypt complete (reused, $decryptedSize bytes)',
             );
           } else {
-            debugPrint('🔐 [READING] File decrypted: yes (just decrypted, $decryptedSize bytes)');
             await updateDialog(
               stepKey: 'Decrypting',
               message: 'Decrypt complete ($decryptedSize bytes)',
             );
           }
         } catch (e, st) {
-          debugPrint('❌ [READING] Decryption failed: $e\n$st');
           await updateDialog(
             stepKey: 'Decrypting',
             message: '',
@@ -674,7 +632,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       
       // Check if file is a ZIP and extract it if necessary
       await updateDialog(stepKey: 'Unzipping', message: 'Unzipping book...');
-      debugPrint('📦 [READING] Checking if file is a ZIP: $filePath');
       ({String path, bool wasExtracted}) processed;
       try {
         processed = await ZipHandler.processBookFile(filePath);
@@ -689,7 +646,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       }
       
       if (processed.wasExtracted) {
-        debugPrint('📦 [READING] ZIP file was extracted to: $filePath');
       }
       
       // Determine the book directory
@@ -707,7 +663,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
         indexHtmlPath = filePath;
       } else if (isDirectory) {
         // It's a directory, look for index.html
-        debugPrint('📂 [READING] Path is a directory, searching for index.html: $filePath');
         indexHtmlPath = await ZipHandler.findIndexHtml(filePath);
         
         if (indexHtmlPath == null) {
@@ -719,13 +674,10 @@ class _ReadingScreenState extends State<ReadingScreen> {
         throw Exception('Path is neither a file nor a directory: $filePath');
       }
       
-      debugPrint('📂 [READING] Book directory: ${bookDirectory.path}');
-      debugPrint('📄 [READING] Index HTML: $indexHtmlPath');
       
       await updateDialog(stepKey: 'Starting reader', message: 'Starting reader...');
 
       // Always start server (needed for Android/Windows; kept ready for Linux fallback)
-      debugPrint('🚀 [READING] Starting local HTTP server...');
       await _startLocalServer(bookDirectory);
       final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path);
       final urlPath = relativePath.replaceAll('\\', '/');
@@ -736,11 +688,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
         // Linux: try file:// first (Uri.file for proper encoding). Fallback to HTTP if it fails.
         bookUrl = Uri.file(indexHtmlPath).toString();
         _linuxHttpFallbackUrl = httpUrl;
-        debugPrint('🌐 [READING] Loading book via file:// (Linux): $bookUrl');
       } else {
         _linuxHttpFallbackUrl = null;
         bookUrl = httpUrl;
-        debugPrint('🌐 [READING] Loading book via HTTP: $bookUrl');
       }
 
       // Close "Opening book" dialog before loading so we don't appear stuck if loadRequest is slow (e.g. Android TV WebView)
@@ -753,7 +703,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             _controller.loadRequest(Uri.parse(bookUrl));
-            debugPrint('✅ [READING] Load initiated (desktop)');
           }
         });
       } else {
@@ -765,9 +714,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
           if (!mounted) return;
           try {
             _controller.loadRequest(Uri.parse(bookUrl));
-            debugPrint('✅ [READING] Load initiated (Android TV): $bookUrl');
           } catch (e) {
-            debugPrint('❌ [READING] loadRequest failed: $e');
             if (mounted) {
               setState(() {
                 _isLoading = false;
@@ -778,7 +725,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
         });
       }
     } catch (e, st) {
-      debugPrint('❌ [READING] Failed to load file: $e\n$st');
       await _stopLocalServer();
       if (mounted) {
         final errorStr = e.toString().toLowerCase();
@@ -817,7 +763,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       try {
         _serverPort = port;
         _localServer = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-        debugPrint('✅ [READING] Local HTTP server started on http://127.0.0.1:$port');
         break;
       } catch (e) {
         if (port == 8089) {
@@ -846,7 +791,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
         final filePath = path.join(bookDirectory.path, requestedPath);
         final file = File(filePath);
         
-        debugPrint('📡 [SERVER] Request: ${request.uri.path} -> $filePath');
         
         if (await file.exists()) {
           // Determine content type
@@ -903,7 +847,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
             ..add(fileBytes)
             ..close();
           
-          debugPrint('✅ [SERVER] Served: ${request.uri.path} (${fileBytes.length} bytes)');
         } else {
           // File not found
           request.response
@@ -911,10 +854,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
             ..write('File not found: ${request.uri.path}')
             ..close();
           
-          debugPrint('❌ [SERVER] File not found: ${request.uri.path}');
         }
       } catch (e) {
-        debugPrint('❌ [SERVER] Error serving request: $e');
         request.response
           ..statusCode = HttpStatus.internalServerError
           ..write('Server error: $e')
@@ -922,7 +863,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       }
     });
     
-    debugPrint('🌐 [READING] Server ready to serve files from: ${bookDirectory.path}');
   }
 
   String _getPlaceholderHtml() {

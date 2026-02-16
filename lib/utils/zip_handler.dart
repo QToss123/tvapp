@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'package:archive/archive.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 
@@ -16,7 +15,6 @@ class ZipHandler {
   /// Also finds and returns the path to index.html if it exists
   static Future<String?> extractZipFile(String zipFilePath) async {
     try {
-      debugPrint('Extracting ZIP file: $zipFilePath');
       
       final zipFile = File(zipFilePath);
       if (!await zipFile.exists()) {
@@ -37,7 +35,6 @@ class ZipHandler {
       }
       await extractDir.create(recursive: true);
 
-      debugPrint('Extracting to: ${extractDir.path}');
 
       // Extract all files from the archive
       for (final file in archive) {
@@ -56,10 +53,8 @@ class ZipHandler {
         }
       }
 
-      debugPrint('Successfully extracted ZIP file to: ${extractDir.path}');
       return extractDir.path;
     } catch (e) {
-      debugPrint('Error extracting ZIP file: $e');
       rethrow;
     }
   }
@@ -76,22 +71,18 @@ class ZipHandler {
       // First, check if index.html is directly in the root
       final rootIndexHtml = File(path.join(directoryPath, 'index.html'));
       if (await rootIndexHtml.exists()) {
-        debugPrint('Found index.html at root: ${rootIndexHtml.path}');
         return rootIndexHtml.path;
       }
 
       // Search recursively for index.html
       await for (final entity in dir.list(recursive: true)) {
         if (entity is File && path.basename(entity.path).toLowerCase() == 'index.html') {
-          debugPrint('Found index.html: ${entity.path}');
           return entity.path;
         }
       }
 
-      debugPrint('index.html not found in extracted directory');
       return null;
     } catch (e) {
-      debugPrint('Error searching for index.html: $e');
       return null;
     }
   }
@@ -109,13 +100,11 @@ class ZipHandler {
     if (await extractDir.exists()) {
       final existingIndex = await findIndexHtml(extractDir.path);
       if (existingIndex != null) {
-        debugPrint('Reusing existing extracted folder: ${extractDir.path}');
         return (path: existingIndex, wasExtracted: false);
       }
     }
 
     // It's a ZIP file, extract it
-    debugPrint('File is a ZIP, extracting...');
     final extractedPath = await extractZipFile(filePath);
     
     if (extractedPath == null) {

@@ -98,7 +98,6 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
           }
         } catch (_) {}
       }
-      debugPrint('Storage locations (Windows): ${locations.length} drives');
       return locations;
     }
 
@@ -122,7 +121,6 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
         } catch (_) {}
       }
       if (locations.isNotEmpty) {
-        debugPrint('Storage locations (Linux): ${locations.length}');
         return locations;
       }
     }
@@ -150,12 +148,10 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
             addedInternalPath = internalPath;
             break; // Only add one internal storage path
           } catch (e) {
-            debugPrint('Cannot access internal storage $internalPath: $e');
             continue;
           }
         }
       } catch (e) {
-        debugPrint('Internal storage $internalPath does not exist: $e');
         continue;
       }
     }
@@ -180,7 +176,6 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
                   isInternal: true,
                   displayPath: downloadPath,
                 ));
-                debugPrint('Added Download folder: $downloadPath');
               }
               break;
             } catch (_) {}
@@ -216,7 +211,6 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
     try {
       final mediaRwDir = Directory('/mnt/media_rw');
       if (await mediaRwDir.exists()) {
-        debugPrint('Checking /mnt/media_rw for USB drives...');
         try {
           int count = 0;
           await for (final entity in mediaRwDir.list()) {
@@ -227,7 +221,6 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
               try {
                 await entity.list().first.timeout(const Duration(milliseconds: 500));
                 if (!locations.any((loc) => loc.path == fullPath || path.basename(loc.path) == dirName)) {
-                  debugPrint('Adding USB drive: $fullPath');
                   locations.add(StorageLocation(
                     path: fullPath,
                     name: 'USB Drive ($dirName)',
@@ -236,16 +229,13 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
                   ));
                 }
               } catch (e) {
-                debugPrint('Cannot access $fullPath: $e');
               }
             }
           }
         } catch (e) {
-          debugPrint('Cannot list /mnt/media_rw: $e');
         }
       }
     } catch (e) {
-      debugPrint('Cannot access /mnt/media_rw: $e');
     }
 
     // Android TV / OEM-specific USB mount points
@@ -271,7 +261,6 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
                 isInternal: false,
                 displayPath: root,
               ));
-              debugPrint('Added USB root: $root');
             }
           } catch (_) {}
           // Also list subdirs (e.g. /mnt/usb/sda1)
@@ -289,7 +278,6 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
                       isInternal: false,
                       displayPath: fullPath,
                     ));
-                    debugPrint('Added USB: $fullPath');
                   }
                 } catch (_) {}
               }
@@ -304,7 +292,6 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
     try {
       final storageDir = Directory('/storage');
       if (await storageDir.exists()) {
-        debugPrint('Checking /storage for mounted devices...');
         try {
           int count = 0;
           await for (final entity in storageDir.list()) {
@@ -322,7 +309,6 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
                 continue;
               }
               
-              debugPrint('Found directory in /storage: $fullPath');
               
               // This is likely a USB drive or external storage
               try {
@@ -335,7 +321,6 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
                   (loc.path.contains(dirName) && dirName.length > 3));
                 
                 if (!pathExists) {
-                  debugPrint('Adding external storage: $fullPath');
                   locations.add(StorageLocation(
                     path: fullPath,
                     name: dirName.contains('-') ? 'USB Drive ($dirName)' : 'External Storage ($dirName)',
@@ -344,19 +329,15 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
                   ));
                 }
               } catch (e) {
-                debugPrint('Cannot access $fullPath: $e');
                 continue;
               }
             }
           }
         } catch (e) {
-          debugPrint('Cannot list /storage: $e');
         }
       } else {
-        debugPrint('/storage does not exist');
       }
     } catch (e) {
-      debugPrint('Cannot access /storage: $e');
     }
     
     // On Android, always add "Browse All Storage Devices" first so user can
@@ -371,10 +352,8 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
             isInternal: false,
             displayPath: '/storage',
           ));
-          debugPrint('Added Browse All Storage for Android');
         }
       } catch (e) {
-        debugPrint('Cannot add /storage option: $e');
       }
     } else {
       final hasExternal = locations.any((loc) => !loc.isInternal);
@@ -390,12 +369,10 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
             ));
           }
         } catch (e) {
-          debugPrint('Cannot add /storage fallback: $e');
         }
       }
     }
     
-    debugPrint('Total storage locations found: ${locations.length}');
     return locations;
   }
 

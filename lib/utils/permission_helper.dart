@@ -15,17 +15,14 @@ class PermissionHelper {
       try {
         final status = await ph.Permission.manageExternalStorage.status;
         if (status.isGranted) {
-          debugPrint('Manage external storage already granted');
           return true;
         }
         final requested = await ph.Permission.manageExternalStorage.request();
         if (requested.isGranted) return true;
         if (requested.isPermanentlyDenied) {
-          debugPrint('Manage external storage permanently denied');
           return false;
         }
       } catch (e) {
-        debugPrint('Manage external storage not available: $e');
       }
 
       // Android 10 and below: READ/WRITE_EXTERNAL_STORAGE
@@ -36,11 +33,9 @@ class PermissionHelper {
         if (requested.isGranted) return true;
         if (requested.isPermanentlyDenied) return false;
       } catch (e) {
-        debugPrint('Storage permission error: $e');
       }
       return false;
     } catch (e) {
-      debugPrint('Error requesting storage permissions: $e');
       return false;
     }
   }
@@ -56,7 +51,6 @@ class PermissionHelper {
       await ph.Permission.manageExternalStorage.request();
       return await ph.Permission.manageExternalStorage.isGranted;
     } catch (e) {
-      debugPrint('Open all files access error: $e');
       // Fallback: open app settings so user can find "Files and media" / "All files"
       return await ph.openAppSettings();
     }
@@ -74,7 +68,6 @@ class PermissionHelper {
       } catch (_) {}
       return false;
     } catch (e) {
-      debugPrint('Error checking storage permissions: $e');
       return false;
     }
   }
@@ -84,7 +77,6 @@ class PermissionHelper {
     try {
       return await ph.openAppSettings();
     } catch (e) {
-      debugPrint('Error opening app settings: $e');
       return false;
     }
   }

@@ -26,17 +26,14 @@ class ThumbnailHelper {
       final response = await http.get(Uri.parse(url)).timeout(
         const Duration(seconds: 15),
         onTimeout: () {
-          debugPrint('Thumbnail download timeout: $url');
           throw Exception('Timeout');
         },
       );
       if (response.statusCode != 200) return null;
 
       await file.writeAsBytes(response.bodyBytes);
-      debugPrint('Thumbnail saved: $filePath');
       return filePath;
     } catch (e) {
-      debugPrint('Thumbnail download failed: $e');
       return null;
     }
   }
