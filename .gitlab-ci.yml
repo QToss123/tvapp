@@ -11,7 +11,7 @@ package-linux:
   stage: package
   extends: .package
   variables: 
-    DOCKER_FILE: 'linux.Dockerfile'
+    DOCKER_FILE: 'Dockerfile.linux'
   when: manual  
 
 
@@ -19,14 +19,14 @@ package-android:
   stage: package
   extends: .package
   variables: 
-    DOCKER_FILE: 'android.Dockerfile'
+    DOCKER_FILE: 'Dockerfile.android'
   when: manual  
 
 package-windows:
   stage: package
   extends: .package.windows
   variables: 
-    DOCKER_FILE: 'windows.Dockerfile'
+    DOCKER_FILE: 'Dockerfile.windows'
   when: manual  
 
 release-linux:
@@ -40,7 +40,7 @@ release-android:
     - package-android
   stage: release
   extends: .release
-    
+
 release-windows:
   needs:
     - package-windows
