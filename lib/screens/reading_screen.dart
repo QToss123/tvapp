@@ -401,9 +401,21 @@ class _ReadingScreenState extends State<ReadingScreen> {
       _loadFile(contentUrl);
     } else if (contentUrl.startsWith('http://') || contentUrl.startsWith('https://')) {
       c.loadRequest(Uri.parse(contentUrl));
+    } else if (_looksLikeLocalPath(contentUrl)) {
+      // Raw path (e.g. C:\path on Windows or /path) — treat as file
+      final fileUrl = contentUrl.contains('://') ? contentUrl : 'file:///${contentUrl.replaceAll(r'\', '/')}';
+      _loadFile(fileUrl);
     } else {
       _loadAsset(contentUrl);
     }
+  }
+
+  /// True if string looks like a local file path (Windows or POSIX).
+  static bool _looksLikeLocalPath(String url) {
+    if (url.isEmpty) return false;
+    if (Platform.isWindows && url.length >= 2 && url[1] == ':') return true;
+    if (url.startsWith('/') && !url.startsWith('//')) return true;
+    return false;
   }
 
   /// Normalizes the content URL to handle book folders.
@@ -498,7 +510,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
   /// Converts a file:// URL to a native filesystem path (handles Windows drive letters).
   static String _fileUrlToPath(String fileUrl) {
-    final uri = Uri.parse(fileUrl);
+    // Normalize so Uri.parse works (e.g. file:///C:\path -> file:///C:/path)
+    final normalizedUrl = fileUrl.replaceAll(r'\', '/');
+    final uri = Uri.parse(normalizedUrl);
     var filePath = uri.path;
     if (Platform.isWindows &&
         filePath.length >= 3 &&

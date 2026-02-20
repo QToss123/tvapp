@@ -162,23 +162,24 @@ class DatabaseService {
     return id;
   }
 
-  /// Gets all books from the database
+  /// Gets all books from the database (only books with a local file_path — no default/pending entries).
   static Future<List<Book>> getAllBooks() async {
     try {
       final db = await database;
-      
+
       final List<Map<String, dynamic>> maps = await db.query(
         _tableBooks,
+        where: '$_colFilePath IS NOT NULL AND $_colFilePath != ?',
+        whereArgs: [''],
         orderBy: '$_colCreatedAt DESC',
       );
 
-      
       if (maps.isEmpty) {
         return [];
       }
 
       final books = List.generate(maps.length, (i) {
-        // Prioritize file_path over content_url for downloaded books
+        // Use file_path for downloaded books (content_url may be API URL)
         String? contentUrl = maps[i][_colFilePath];
         if (contentUrl == null || contentUrl.isEmpty) {
           contentUrl = maps[i][_colContentUrl];
@@ -193,20 +194,20 @@ class DatabaseService {
         final encNonceB64 = maps[i][_colEncNonceB64];
         
         
-        // Ensure file:// protocol for local files
-        if (contentUrl != null && 
-            contentUrl.isNotEmpty && 
-            !contentUrl.startsWith('http') && 
+        // Ensure file:// protocol for local files (use forward slashes so URI is valid on Windows)
+        if (contentUrl != null &&
+            contentUrl.isNotEmpty &&
+            !contentUrl.startsWith('http') &&
             !contentUrl.startsWith('file://') &&
             !contentUrl.startsWith('assets/')) {
-          // If it's a local file path, ensure it has file:// protocol
-          if (contentUrl.startsWith('/')) {
-            contentUrl = 'file://$contentUrl';
+          final pathForUrl = contentUrl.replaceAll('\\', '/');
+          if (pathForUrl.startsWith('/')) {
+            contentUrl = 'file://$pathForUrl';
           } else {
-            contentUrl = 'file:///$contentUrl';
+            contentUrl = 'file:///$pathForUrl';
           }
         }
-        
+
         return Book(
           title: title,
           author: author,
@@ -255,20 +256,20 @@ class DatabaseService {
         final encKeyB64 = maps[i][_colEncKeyB64];
         final encNonceB64 = maps[i][_colEncNonceB64];
         
-        // Ensure file:// protocol for local files
-        if (contentUrl != null && 
-            contentUrl.isNotEmpty && 
-            !contentUrl.startsWith('http') && 
+        // Ensure file:// protocol for local files (forward slashes for valid URI on Windows)
+        if (contentUrl != null &&
+            contentUrl.isNotEmpty &&
+            !contentUrl.startsWith('http') &&
             !contentUrl.startsWith('file://') &&
             !contentUrl.startsWith('assets/')) {
-          // If it's a local file path, ensure it has file:// protocol
-          if (contentUrl.startsWith('/')) {
-            contentUrl = 'file://$contentUrl';
+          final pathForUrl = contentUrl.replaceAll('\\', '/');
+          if (pathForUrl.startsWith('/')) {
+            contentUrl = 'file://$pathForUrl';
           } else {
-            contentUrl = 'file:///$contentUrl';
+            contentUrl = 'file:///$pathForUrl';
           }
         }
-        
+
         return Book(
           title: maps[i][_colTitle] ?? 'Untitled',
           author: maps[i][_colAuthor] ?? 'Unknown',
@@ -364,17 +365,17 @@ class DatabaseService {
     final encKeyB64 = maps[0][_colEncKeyB64];
     final encNonceB64 = maps[0][_colEncNonceB64];
     
-    // Ensure file:// protocol for local files
-    if (contentUrl != null && 
-        contentUrl.isNotEmpty && 
-        !contentUrl.startsWith('http') && 
+    // Ensure file:// protocol for local files (forward slashes for valid URI on Windows)
+    if (contentUrl != null &&
+        contentUrl.isNotEmpty &&
+        !contentUrl.startsWith('http') &&
         !contentUrl.startsWith('file://') &&
         !contentUrl.startsWith('assets/')) {
-      // If it's a local file path, ensure it has file:// protocol
-      if (contentUrl.startsWith('/')) {
-        contentUrl = 'file://$contentUrl';
+      final pathForUrl = contentUrl.replaceAll('\\', '/');
+      if (pathForUrl.startsWith('/')) {
+        contentUrl = 'file://$pathForUrl';
       } else {
-        contentUrl = 'file:///$contentUrl';
+        contentUrl = 'file:///$pathForUrl';
       }
     }
 
@@ -392,30 +393,36 @@ class DatabaseService {
     );
   }
 
-  /// Gets book by file path (prefers file_path, falls back to content_url)
+  /// Gets book by file path (prefers file_path, falls back to content_url).
+  /// Tries normalized path so lookup works on Windows regardless of / vs \.
   static Future<Book?> getBookByFilePath(String filePath) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      _tableBooks,
-      where: '$_colFilePath = ?',
-      whereArgs: [filePath],
-      limit: 1,
-    );
+    final normalized = filePath.replaceAll('\\', path.separator).replaceAll('/', path.separator);
+    final altPath = path.separator == '\\' ? filePath.replaceAll('\\', '/') : filePath.replaceAll('/', '\\');
 
     Map<String, dynamic>? row;
-    if (maps.isNotEmpty) {
-      row = maps[0];
-    } else {
-      final fileUrl = filePath.startsWith('file://') ? filePath : 'file://$filePath';
+    for (final tryPath in [filePath, normalized, altPath]) {
+      if (tryPath.isEmpty) continue;
+      final List<Map<String, dynamic>> maps = await db.query(
+        _tableBooks,
+        where: '$_colFilePath = ?',
+        whereArgs: [tryPath],
+        limit: 1,
+      );
+      if (maps.isNotEmpty) {
+        row = maps[0];
+        break;
+      }
+    }
+    if (row == null) {
+      final fileUrl = filePath.startsWith('file://') ? filePath : 'file:///${filePath.replaceAll('\\', '/')}';
       final List<Map<String, dynamic>> urlMaps = await db.query(
         _tableBooks,
         where: '$_colContentUrl = ?',
         whereArgs: [fileUrl],
         limit: 1,
       );
-      if (urlMaps.isNotEmpty) {
-        row = urlMaps[0];
-      }
+      if (urlMaps.isNotEmpty) row = urlMaps[0];
     }
 
     if (row == null) return null;
@@ -429,16 +436,17 @@ class DatabaseService {
     final encKeyB64 = row[_colEncKeyB64];
     final encNonceB64 = row[_colEncNonceB64];
 
-    // Ensure file:// protocol for local files
+    // Ensure file:// protocol for local files (forward slashes for valid URI on Windows)
     if (contentUrl != null &&
         contentUrl.isNotEmpty &&
         !contentUrl.startsWith('http') &&
         !contentUrl.startsWith('file://') &&
         !contentUrl.startsWith('assets/')) {
-      if (contentUrl.startsWith('/')) {
-        contentUrl = 'file://$contentUrl';
+      final pathForUrl = contentUrl.replaceAll('\\', '/');
+      if (pathForUrl.startsWith('/')) {
+        contentUrl = 'file://$pathForUrl';
       } else {
-        contentUrl = 'file:///$contentUrl';
+        contentUrl = 'file:///$pathForUrl';
       }
     }
 

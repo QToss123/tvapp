@@ -71,7 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'CLA-CL251-S71-WYVPXTFSFZ';
+      _licenseController.text = prefs.getString(_kLicenseNumber) ?? '';
       _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
       _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';

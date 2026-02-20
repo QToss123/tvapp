@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Build outputs (we build inside container)
+build/
+
+# Dependencies and caches (re-fetched in container)
+.dart_tool/
+.pub-cache/
+.pub/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# IDE and OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Docs and misc (optional: remove if you want them in image)
+*.md
+!README.md
+
+# Docker files (avoid recursive copy)
+Dockerfile*
+.dockerignore
+
+# Android / iOS (not needed for Windows build)
+android/
+ios/
+linux/
+macos/
+
+# Tests and coverage
+coverage/
+*.test.dart
+
+# Large or unneeded
+*.apk
+*.aab
+*.exe

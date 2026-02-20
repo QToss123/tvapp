@@ -25,197 +25,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _hasInternet = false;
   Timer? _connectivityTimer;
   
-  // Books loaded from API or fallback to dummy data
+  // Books loaded from database (after sync); no default/dummy books on fresh install
   List<Book> _books = [];
-  
-  _HomeScreenState();
-
-  // Dummy books data - fallback for testing (kept for future use)
-  // ignore: unused_field
-  static const List<Book> _dummyBooks = [
-    Book(
-      title: 'Book 1',
-      author: 'Author Name',
-      progress: 30,
-      thumbnail: 'https://covers.openlibrary.org/b/id/12887422-L.jpg',
-      contentUrl: 'assets/books/book1',
-    ),
-    Book(
-      title: 'Book 2',
-      author: 'Another Author',
-      progress: 55,
-      thumbnail: 'https://covers.openlibrary.org/b/id/8739161-L.jpg',
-      contentUrl: 'assets/books/book2',
-    ),
-    Book(
-      title: 'The Pragmatic Programmer',
-      author: 'Andrew Hunt',
-      progress: 12,
-      thumbnail: 'https://covers.openlibrary.org/b/id/10483108-L.jpg',
-    ),
-    Book(
-      title: 'Clean Code',
-      author: 'Robert Martin',
-      progress: 75,
-      thumbnail: 'https://covers.openlibrary.org/b/id/8739161-L.jpg',
-    ),
-    Book(
-      title: 'Design Patterns',
-      author: 'Gang of Four',
-      progress: 40,
-      thumbnail: 'https://covers.openlibrary.org/b/id/10483108-L.jpg',
-    ),
-    Book(
-      title: 'The Lean Startup',
-      author: 'Eric Ries',
-      progress: 60,
-      thumbnail: 'https://covers.openlibrary.org/b/id/12887422-L.jpg',
-    ),
-    Book(
-      title: 'Sapiens',
-      author: 'Yuval Noah Harari',
-      progress: 25,
-      thumbnail: 'https://covers.openlibrary.org/b/id/8739161-L.jpg',
-    ),
-    Book(
-      title: 'Thinking Fast and Slow',
-      author: 'Daniel Kahneman',
-      progress: 50,
-      thumbnail: 'https://covers.openlibrary.org/b/id/10483108-L.jpg',
-    ),
-    Book(
-      title: 'The 7 Habits',
-      author: 'Stephen Covey',
-      progress: 80,
-      thumbnail: 'https://covers.openlibrary.org/b/id/12887422-L.jpg',
-    ),
-    Book(
-      title: 'Good to Great',
-      author: 'Jim Collins',
-      progress: 35,
-      thumbnail: 'https://covers.openlibrary.org/b/id/8739161-L.jpg',
-    ),
-    Book(
-      title: 'Atomic Habits',
-      author: 'James Clear',
-      progress: 45,
-      thumbnail: 'https://covers.openlibrary.org/b/id/10483108-L.jpg',
-    ),
-    Book(
-      title: 'The Power of Now',
-      author: 'Eckhart Tolle',
-      progress: 20,
-      thumbnail: 'https://covers.openlibrary.org/b/id/12887422-L.jpg',
-    ),
-    Book(
-      title: 'Rich Dad Poor Dad',
-      author: 'Robert Kiyosaki',
-      progress: 65,
-      thumbnail: 'https://covers.openlibrary.org/b/id/8739161-L.jpg',
-    ),
-    Book(
-      title: 'The Art of War',
-      author: 'Sun Tzu',
-      progress: 90,
-      thumbnail: 'https://covers.openlibrary.org/b/id/10483108-L.jpg',
-    ),
-    Book(
-      title: '1984',
-      author: 'George Orwell',
-      progress: 55,
-      thumbnail: 'https://covers.openlibrary.org/b/id/12887422-L.jpg',
-    ),
-    Book(
-      title: 'To Kill a Mockingbird',
-      author: 'Harper Lee',
-      progress: 70,
-      thumbnail: 'https://covers.openlibrary.org/b/id/8739161-L.jpg',
-    ),
-    Book(
-      title: 'The Great Gatsby',
-      author: 'F. Scott Fitzgerald',
-      progress: 40,
-      thumbnail: 'https://covers.openlibrary.org/b/id/10483108-L.jpg',
-    ),
-    Book(
-      title: 'Pride and Prejudice',
-      author: 'Jane Austen',
-      progress: 60,
-      thumbnail: 'https://covers.openlibrary.org/b/id/12887422-L.jpg',
-    ),
-    Book(
-      title: 'The Catcher in the Rye',
-      author: 'J.D. Salinger',
-      progress: 30,
-      thumbnail: 'https://covers.openlibrary.org/b/id/8739161-L.jpg',
-    ),
-    Book(
-      title: 'Lord of the Flies',
-      author: 'William Golding',
-      progress: 50,
-      thumbnail: 'https://covers.openlibrary.org/b/id/10483108-L.jpg',
-    ),
-    Book(
-      title: 'The Hobbit',
-      author: 'J.R.R. Tolkien',
-      progress: 85,
-      thumbnail: 'https://covers.openlibrary.org/b/id/12887422-L.jpg',
-    ),
-    Book(
-      title: 'Harry Potter',
-      author: 'J.K. Rowling',
-      progress: 95,
-      thumbnail: 'https://covers.openlibrary.org/b/id/8739161-L.jpg',
-    ),
-    Book(
-      title: 'The Alchemist',
-      author: 'Paulo Coelho',
-      progress: 75,
-      thumbnail: 'https://covers.openlibrary.org/b/id/10483108-L.jpg',
-    ),
-    Book(
-      title: 'The Kite Runner',
-      author: 'Khaled Hosseini',
-      progress: 55,
-      thumbnail: 'https://covers.openlibrary.org/b/id/12887422-L.jpg',
-    ),
-    Book(
-      title: 'The Book Thief',
-      author: 'Markus Zusak',
-      progress: 65,
-      thumbnail: 'https://covers.openlibrary.org/b/id/8739161-L.jpg',
-    ),
-    Book(
-      title: 'Life of Pi',
-      author: 'Yann Martel',
-      progress: 45,
-      thumbnail: 'https://covers.openlibrary.org/b/id/10483108-L.jpg',
-    ),
-    Book(
-      title: 'The Fault in Our Stars',
-      author: 'John Green',
-      progress: 35,
-      thumbnail: 'https://covers.openlibrary.org/b/id/12887422-L.jpg',
-    ),
-    Book(
-      title: 'Gone Girl',
-      author: 'Gillian Flynn',
-      progress: 80,
-      thumbnail: 'https://covers.openlibrary.org/b/id/8739161-L.jpg',
-    ),
-    Book(
-      title: 'The Girl on the Train',
-      author: 'Paula Hawkins',
-      progress: 60,
-      thumbnail: 'https://covers.openlibrary.org/b/id/10483108-L.jpg',
-    ),
-    Book(
-      title: 'The Da Vinci Code',
-      author: 'Dan Brown',
-      progress: 70,
-      thumbnail: 'https://covers.openlibrary.org/b/id/12887422-L.jpg',
-    ),
-  ];
 
   String _query = '';
   final FocusNode _searchFocusNode = FocusNode();
@@ -268,10 +79,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Loads books from local database.
+  /// Loads books from local database. Only shows books if sync has been completed
+  /// (so fresh install never shows books until user completes sync).
   /// [storageAlreadyChecked] if true, skips storage check (caller already did it).
   Future<void> _loadBooks({bool? storageAlreadyChecked}) async {
     if (!_isLicenseActivated) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final syncCompleted = prefs.getBool('syncCompleted') ?? false;
+    if (!syncCompleted && mounted) {
+      setState(() {
+        _books = [];
+        _isLoadingBooks = false;
+      });
       return;
     }
 

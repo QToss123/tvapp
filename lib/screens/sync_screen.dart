@@ -612,7 +612,10 @@ class _SyncScreenState extends State<SyncScreen> {
       widget.onClose?.call();
       if (mounted) Navigator.pop(context);
     } else {
-      if (mounted) Navigator.pop(context);
+      // Go to WebBooks (home): pop until we reach home so book taps work (don't push a new Home)
+      if (mounted) {
+        Navigator.popUntil(context, ModalRoute.withName(AppRoutes.home));
+      }
     }
   }
 
