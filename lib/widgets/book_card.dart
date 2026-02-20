@@ -16,6 +16,7 @@ class BookCard extends StatefulWidget {
 
 class _BookCardState extends State<BookCard> {
   bool _isHovered = false;
+  bool _isPressed = false;
 
   static bool _isTv(BuildContext context) => MediaQuery.sizeOf(context).width >= 600;
   static double _fs(BuildContext context, double base) =>
@@ -30,11 +31,16 @@ class _BookCardState extends State<BookCard> {
         builder: (context) {
           final hasFocus = Focus.of(context).hasFocus;
           final isHighlighted = hasFocus || widget.isFocused || _isHovered;
-          final cardWidth = _px(context, 120);
-          final cardHeight = _px(context, 180);
-          return MouseRegion(
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final cardWidth = constraints.maxWidth;
+              final cardHeight = constraints.maxHeight;
+              return MouseRegion(
             onEnter: (_) => setState(() => _isHovered = true),
-            onExit: (_) => setState(() => _isHovered = false),
+            onExit: (_) => setState(() {
+              _isHovered = false;
+              _isPressed = false;
+            }),
             cursor: SystemMouseCursors.click,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
@@ -46,7 +52,7 @@ class _BookCardState extends State<BookCard> {
                 boxShadow: isHighlighted
                     ? [
                         BoxShadow(
-                          color: Colors.blueAccent.withOpacity(0.3),
+                          color: Colors.blueAccent.withValues(alpha: 0.3),
                           blurRadius: 6,
                           spreadRadius: 0,
                         )
@@ -56,27 +62,41 @@ class _BookCardState extends State<BookCard> {
               child: SizedBox(
                 width: cardWidth,
                 height: cardHeight,
-                child: Card(
-                  clipBehavior: Clip.antiAlias,
-                  elevation: isHighlighted ? 8 : 2,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  color: Colors.grey.shade50,
-                  child: InkWell(
-                    onTap: () {
-                      Navigator.pushNamed(
-                        context,
-                        AppRoutes.reading,
-                        arguments: widget.book,
-                      );
-                    },
-                    child: Column(
+                child: Transform.scale(
+                  scale: _isPressed ? 0.95 : 1.0,
+                  child: Card(
+                    clipBehavior: Clip.antiAlias,
+                    elevation: isHighlighted ? 8 : 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    color: Colors.grey.shade50,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTapDown: (_) => setState(() => _isPressed = true),
+                        onTapUp: (_) => setState(() => _isPressed = false),
+                        onTapCancel: () => setState(() => _isPressed = false),
+                        onTap: () {
+                          setState(() => _isPressed = false);
+                          // Defer navigation so tap feedback paints and UI stays responsive (avoids ANR)
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (!context.mounted) return;
+                            Navigator.pushNamed(
+                              context,
+                              AppRoutes.reading,
+                              arguments: widget.book,
+                            );
+                          });
+                        },
+                        splashColor: Colors.blueAccent.withValues(alpha: 0.3),
+                        highlightColor: Colors.blueAccent.withValues(alpha: 0.15),
+                        child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // Thumbnail (same as sync screen)
+                        // Thumbnail – give more space to cover, less to title area
                         Expanded(
-                          flex: 3,
+                          flex: 4,
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
@@ -95,7 +115,7 @@ class _BookCardState extends State<BookCard> {
                                       end: Alignment.bottomCenter,
                                       colors: [
                                         Colors.transparent,
-                                        Colors.black.withOpacity(0.6),
+                                        Colors.black.withValues(alpha: 0.6),
                                       ],
                                     ),
                                   ),
@@ -104,45 +124,41 @@ class _BookCardState extends State<BookCard> {
                             ],
                           ),
                         ),
-                        // Title and progress section (same layout as sync screen)
+                        // Title section – compact to reduce bottom white space
                         Expanded(
-                          flex: 2,
+                          flex: 1,
                           child: Container(
                             width: double.infinity,
                             padding: EdgeInsets.symmetric(
-                              horizontal: _px(context, 4),
-                              vertical: _px(context, 3),
+                              horizontal: _px(context, 6),
+                              vertical: _px(context, 4),
                             ),
                             color: Colors.white,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              mainAxisSize: MainAxisSize.min,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    widget.book.title,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: _fs(context, 11),
-                                      color: Colors.grey.shade900,
-                                      height: 1.2,
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-                              ],
+                            alignment: Alignment.center,
+                            child: Text(
+                              widget.book.title,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: _fs(context, 11),
+                                color: Colors.grey.shade900,
+                                height: 1.2,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
                             ),
                           ),
                         ),
                       ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
+            );
+            },
           );
         },
       ),

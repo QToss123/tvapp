@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart' as ph;
 
 /// Helper class for handling runtime permissions (Android only; Windows/Linux need none)
@@ -22,8 +21,7 @@ class PermissionHelper {
         if (requested.isPermanentlyDenied) {
           return false;
         }
-      } catch (e) {
-      }
+      } catch (e) { /* ignore */ }
 
       // Android 10 and below: READ/WRITE_EXTERNAL_STORAGE
       try {
@@ -32,8 +30,7 @@ class PermissionHelper {
         final requested = await ph.Permission.storage.request();
         if (requested.isGranted) return true;
         if (requested.isPermanentlyDenied) return false;
-      } catch (e) {
-      }
+      } catch (e) { /* ignore */ }
       return false;
     } catch (e) {
       return false;

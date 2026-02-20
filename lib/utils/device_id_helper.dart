@@ -21,7 +21,8 @@ class DeviceIdHelper {
       } else {
         return _getFallbackDeviceId();
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[DeviceId] getPlatformDeviceId failed: $e\n$st');
       return _getFallbackDeviceId();
     }
   }
@@ -32,7 +33,8 @@ class DeviceIdHelper {
       if (id != null && id.isNotEmpty) {
         return id;
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[DeviceId] MethodChannel getDeviceId failed: $e\n$st');
     }
     // Fallback: device_info_plus androidId
     final deviceInfo = DeviceInfoPlugin();

@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter/foundation.dart';
 import '../models/book.dart';
 
 /// Database service for storing books locally
@@ -185,13 +184,10 @@ class DatabaseService {
           contentUrl = maps[i][_colContentUrl];
         }
         
-        final title = maps[i][_colTitle] ?? 'Untitled';
-        final courseId = maps[i][_colCourseId];
         final author = maps[i][_colAuthor] ?? 'Unknown';
+        final title = maps[i][_colTitle] ?? 'Untitled';
         final thumbnail = maps[i][_colThumbnail];
         final thumbnailLocal = maps[i][_colThumbnailLocal];
-        final filePath = maps[i][_colFilePath];
-        final contentUrlRaw = maps[i][_colContentUrl];
         final encBookId = maps[i][_colEncBookId];
         final encKeyB64 = maps[i][_colEncKeyB64];
         final encNonceB64 = maps[i][_colEncNonceB64];
@@ -226,7 +222,7 @@ class DatabaseService {
       });
 
       return books;
-    } catch (e, stackTrace) {
+    } catch (e) {
       return [];
     }
   }
@@ -259,8 +255,6 @@ class DatabaseService {
         final encKeyB64 = maps[i][_colEncKeyB64];
         final encNonceB64 = maps[i][_colEncNonceB64];
         
-        final title = maps[i][_colTitle] ?? 'Untitled';
-        
         // Ensure file:// protocol for local files
         if (contentUrl != null && 
             contentUrl.isNotEmpty && 
@@ -276,7 +270,7 @@ class DatabaseService {
         }
         
         return Book(
-          title: maps[i][_colTitle],
+          title: maps[i][_colTitle] ?? 'Untitled',
           author: maps[i][_colAuthor] ?? 'Unknown',
           progress: maps[i][_colProgress] ?? 0,
           thumbnail: maps[i][_colThumbnail],
@@ -288,7 +282,7 @@ class DatabaseService {
           encNonceB64: encNonceB64 as String?,
         );
       });
-    } catch (e, stackTrace) {
+    } catch (e) {
       return [];
     }
   }
@@ -555,7 +549,7 @@ class DatabaseService {
         'booksWithoutPaths': withoutPaths,
         'books': booksInfo,
       };
-    } catch (e, stackTrace) {
+    } catch (e) {
       return {
         'hasData': false,
         'error': e.toString(),
@@ -606,8 +600,7 @@ class DatabaseService {
           }
         }
       }
-    } catch (e) {
-    }
+    } catch (e) { /* ignore */ }
     
     return books;
   }

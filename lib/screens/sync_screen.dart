@@ -1,15 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as path;
-import 'dart:io';
 import '../services/api_service.dart';
 import '../services/database_service.dart';
 import '../utils/thumbnail_helper.dart';
 import '../models/book.dart';
 import '../routes.dart';
-import '../utils/zip_handler.dart';
 import '../utils/connectivity_helper.dart';
 import '../services/background_sync_service.dart';
 
@@ -22,7 +19,6 @@ class SyncItem {
   final Map<String, dynamic> course;
   String status; // pending | downloading | done | error
   int progress;  // 0-100
-  bool selected; // for select/unselect
 
   SyncItem({
     required this.courseId,
@@ -32,7 +28,6 @@ class SyncItem {
     this.thumbnail,
     this.status = 'pending',
     this.progress = 0,
-    this.selected = true,
   });
 }
 
@@ -119,24 +114,14 @@ class _SyncScreenState extends State<SyncScreen> {
 
   Future<void> _runDownloadsNow() async {
     if (_storageLocationForSync == null) return;
-    final selectedItems = _syncItems.where((s) => s.selected).toList();
-    if (selectedItems.isEmpty) {
-      if (!mounted) return;
-      setState(() {
-        _statusMessage = 'Please select at least one course to download.';
-      });
-      return;
-    }
     if (!mounted) return;
     setState(() {
       _isLoading = true;
-      _statusMessage = 'Downloading ${selectedItems.length} book(s)...';
+      _statusMessage = 'Downloading ${_syncItems.length} book(s)...';
     });
     final futures = <Future<void>>[];
     for (int i = 0; i < _syncItems.length; i++) {
-      if (_syncItems[i].selected) {
-        futures.add(_downloadOneCourse(i, _storageLocationForSync!));
-      }
+      futures.add(_downloadOneCourse(i, _storageLocationForSync!));
     }
     await Future.wait(futures);
     final done = _syncItems.where((s) => s.status == 'done').length;
@@ -255,7 +240,6 @@ class _SyncScreenState extends State<SyncScreen> {
       for (final course in allCourses) {
         final courseId = course['id'] as int? ?? 0;
         final title = course['title']?.toString() ?? 'Untitled';
-        final description = course['description']?.toString() ?? '';
         final thumbnail = course['thumbnail']?.toString();
         final productName = course['product_name']?.toString() ?? 'Unknown Product';
 
@@ -287,11 +271,10 @@ class _SyncScreenState extends State<SyncScreen> {
           courseId: courseId,
           title: title,
           productName: productName,
-          course: course as Map<String, dynamic>,
+          course: course,
           thumbnail: thumb,
           status: 'pending',
           progress: 0,
-          selected: true,
         ));
       }
 
@@ -325,7 +308,6 @@ class _SyncScreenState extends State<SyncScreen> {
   Future<void> _downloadOneCourse(int index, String storageLocation) async {
     if (index < 0 || index >= _syncItems.length) return;
     final item = _syncItems[index];
-    if (!item.selected) return;
     // Skip if already downloaded (file exists and in DB)
     final filePath = await DatabaseService.getFilePathByCourseId(item.courseId);
     if (filePath != null && filePath.isNotEmpty) {
@@ -395,9 +377,9 @@ class _SyncScreenState extends State<SyncScreen> {
         progress: 0,
         thumbnail: thumb,
         thumbnailLocalPath: thumbnailLocalPath,
-        contentUrl: finalPath != null && finalPath.startsWith('/')
+        contentUrl: finalPath.startsWith('/')
             ? 'file://$finalPath'
-            : finalPath != null && finalPath.startsWith('file://')
+            : finalPath.startsWith('file://')
                 ? finalPath
                 : 'file:///$finalPath',
         encBookId: encBookId,
@@ -474,40 +456,19 @@ class _SyncScreenState extends State<SyncScreen> {
                 !_syncComplete &&
                 !_isLoading) ...[
               const SizedBox(height: 12),
-              Builder(
-                builder: (context) {
-                  final selectedCount = _syncItems.where((s) => s.selected).length;
-                  return Text(
-                    '${selectedCount} of ${_syncItems.length} selected (check/uncheck to choose which to download)',
-                    style: TextStyle(
-                      fontSize: _tvFontSize(context, 15),
-                      color: Colors.grey.shade800,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 8),
               Row(
                 children: [
                   Expanded(
-                    child: Builder(
-                      builder: (context) {
-                        final selectedCount = _syncItems.where((s) => s.selected).length;
-                        return ElevatedButton.icon(
-                          onPressed: selectedCount > 0 ? _runDownloadsNow : null,
-                          icon: const Icon(Icons.download, size: 20),
-                          label: Text(
-                            selectedCount > 0
-                                ? 'Download ($selectedCount selected)'
-                                : 'Select at least 1 book',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                          ),
-                        );
-                      },
+                    child: ElevatedButton.icon(
+                      onPressed: _runDownloadsNow,
+                      icon: const Icon(Icons.download, size: 20),
+                      label: Text(
+                        'Download (${_syncItems.length} books)',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                      ),
                     ),
                   ),
                   if (Platform.isAndroid) ...[
@@ -577,12 +538,6 @@ class _SyncScreenState extends State<SyncScreen> {
                             final item = _syncItems[i];
                             return _SyncItemGridTile(
                               item: item,
-                              onSelectChanged: (selected) {
-                                if (!mounted) return;
-                                setState(() {
-                                  item.selected = selected;
-                                });
-                              },
                               onRetry: item.status == 'error' && _storageLocationForSync != null
                                   ? () => _downloadOneCourse(i, _storageLocationForSync!)
                                   : null,
@@ -685,12 +640,10 @@ class _SyncScreenState extends State<SyncScreen> {
 
 class _SyncItemGridTile extends StatelessWidget {
   final SyncItem item;
-  final ValueChanged<bool>? onSelectChanged;
   final VoidCallback? onRetry;
 
   const _SyncItemGridTile({
     required this.item,
-    this.onSelectChanged,
     this.onRetry,
   });
 
@@ -706,8 +659,6 @@ class _SyncItemGridTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDone = item.status == 'done';
     final isError = item.status == 'error';
-    final isDownloading = item.status == 'downloading';
-    final tv = _isTv(context);
     final statusColor = isError
         ? Colors.red
         : isDone
@@ -726,7 +677,7 @@ class _SyncItemGridTile extends StatelessWidget {
                   ? Border.all(color: Colors.blueAccent, width: 2)
                   : null,
               boxShadow: hasFocus
-                  ? [BoxShadow(color: Colors.blueAccent.withOpacity(0.3), blurRadius: 6, spreadRadius: 0)]
+                  ? [BoxShadow(color: Colors.blueAccent.withValues(alpha: 0.3), blurRadius: 6, spreadRadius: 0)]
                   : null,
             ),
             child: Card(
@@ -767,36 +718,12 @@ class _SyncItemGridTile extends StatelessWidget {
                                 end: Alignment.bottomCenter,
                                 colors: [
                                   Colors.transparent,
-                                  Colors.black.withOpacity(0.6),
+                                  Colors.black.withValues(alpha: 0.6),
                                 ],
                               ),
                             ),
                           ),
                         ),
-                        if (onSelectChanged != null && !isDone && !isError)
-                          Positioned(
-                            top: _px(context, 4),
-                            left: _px(context, 4),
-                            child: Material(
-                              color: Colors.white.withOpacity(0.95),
-                              borderRadius: BorderRadius.circular(6),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(6),
-                                onTap: () => onSelectChanged!(!item.selected),
-                                child: Padding(
-                                  padding: EdgeInsets.all(_px(context, 4)),
-                                  child: Checkbox(
-                                    value: item.selected,
-                                    onChanged: (v) => onSelectChanged!(v ?? true),
-                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    visualDensity: tv
-                                        ? VisualDensity.standard
-                                        : VisualDensity.compact,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
                         if (isDone)
                           Positioned(
                             top: _px(context, 4),

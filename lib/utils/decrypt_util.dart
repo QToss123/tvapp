@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import '../services/book_decryption_service.dart';
@@ -52,11 +51,7 @@ Future<bool> isDecryptedFileAvailable({
     encBookId: encBookId,
   );
   final f = File(decPath);
-  final exists = await f.exists();
-  if (exists) {
-    final len = await f.length();
-  }
-  return exists;
+  return await f.exists();
 }
 
 /// Decrypts the book file when opened (on click). Reuses existing decrypted file if present.
@@ -84,14 +79,13 @@ Future<DecryptResult> decryptBookFileIfNeeded({
 
   final decryptedPath = await decryptedPathFor(
     encryptedFilePath: encryptedFilePath,
-    encBookId: encBookId!,
+    encBookId: encBookId,
   );
   final decryptedFile = File(decryptedPath);
 
   // Check if file already decrypted (reuse _decrypted.zip)
   final alreadyDecrypted = await decryptedFile.exists();
   if (alreadyDecrypted) {
-    final len = await decryptedFile.length();
     return DecryptResult(
       pathToUse: decryptedPath,
       wasDecrypted: true,
@@ -102,9 +96,9 @@ Future<DecryptResult> decryptBookFileIfNeeded({
 
   await BookDecryptionService.decryptFileOnDisk(
     encryptedFilePath: encryptedFilePath,
-    bookId: encBookId!,
-    keyEncB64: encKeyB64!,
-    keyNonceB64: encNonceB64!,
+    bookId: encBookId,
+    keyEncB64: encKeyB64,
+    keyNonceB64: encNonceB64,
     outputFilePath: decryptedPath,
   );
 
@@ -113,7 +107,6 @@ Future<DecryptResult> decryptBookFileIfNeeded({
   if (!await verify.exists()) {
     throw Exception('Decryption completed but decrypted file not found: $decryptedPath');
   }
-  final decryptedSize = await verify.length();
   return DecryptResult(
     pathToUse: decryptedPath,
     wasDecrypted: true,

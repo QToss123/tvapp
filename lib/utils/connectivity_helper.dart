@@ -25,7 +25,7 @@ class ConnectivityHelper {
           return false;
         }
       }
-    } catch (e, st) {
+    } catch (e) {
       return false;
     }
     return false;

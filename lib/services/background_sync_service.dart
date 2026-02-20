@@ -20,7 +20,8 @@ void callbackDispatcher() {
     try {
       await _runBackgroundSync();
       return true;
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[BackgroundSync] Task failed: $e\n$st');
       return false;
     }
   });
@@ -43,8 +44,8 @@ Future<void> _runBackgroundSync() async {
   final allCourses = list.cast<Map<String, dynamic>>();
 
   for (final course in allCourses) {
+    final courseId = course['id'] as int? ?? 0;
     try {
-      final courseId = course['id'] as int? ?? 0;
       final title = course['title']?.toString() ?? 'Untitled';
       final productName = course['product_name']?.toString() ?? 'Unknown Product';
 
@@ -90,9 +91,9 @@ Future<void> _runBackgroundSync() async {
         progress: 0,
         thumbnail: thumb,
         thumbnailLocalPath: thumbnailLocalPath,
-        contentUrl: finalPath != null && finalPath.startsWith('/')
+        contentUrl: finalPath.startsWith('/')
             ? 'file://$finalPath'
-            : finalPath != null && finalPath.startsWith('file://')
+            : finalPath.startsWith('file://')
                 ? finalPath
                 : 'file:///$finalPath',
         encBookId: encBookId,
@@ -106,7 +107,8 @@ Future<void> _runBackgroundSync() async {
         courseId: courseId,
         filePath: finalPath,
       );
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[BackgroundSync] Course $courseId failed: $e\n$st');
     }
   }
 

@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/book.dart';
 import '../routes.dart';
 import '../widgets/book_card.dart';
-import '../services/api_service.dart';
 import '../services/database_service.dart';
+import '../services/book_preprocess_service.dart';
 import '../utils/connectivity_helper.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -30,11 +29,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // Books loaded from API or fallback to dummy data
   List<Book> _books = [];
   
-  // Constructor/initialization logging
-  _HomeScreenState() {
-  }
-  
-  // Dummy books data - fallback for testing
+  _HomeScreenState();
+
+  // Dummy books data - fallback for testing (kept for future use)
+  // ignore: unused_field
   static const List<Book> _dummyBooks = [
     Book(
       title: 'Book 1',
@@ -239,9 +237,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() => _hasInternet = connected);
       }
-    } catch (e, st) {
-      if (kDebugMode) {
-      }
+    } catch (e) {
       if (mounted) {
         setState(() => _hasInternet = false);
       }
@@ -260,66 +256,53 @@ class _HomeScreenState extends State<HomeScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_isLicenseActivated && _books.isNotEmpty) {
-      _checkStorageConnection().then((connected) {
-        if (mounted) {
-          setState(() {
-            _isStorageConnected = connected;
-          });
-          // If storage disconnected, reload status
-          if (!connected) {
-            _checkLicenseStatus();
+      // Defer so first frame paints; avoids bookshelf freeze on return to screen
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _checkStorageConnection().then((connected) {
+          if (mounted) {
+            setState(() => _isStorageConnected = connected);
+            if (!connected) _checkLicenseStatus();
           }
-        }
+        });
       });
     }
   }
 
-  /// Loads books from local database
-  Future<void> _loadBooks() async {
+  /// Loads books from local database.
+  /// [storageAlreadyChecked] if true, skips storage check (caller already did it).
+  Future<void> _loadBooks({bool? storageAlreadyChecked}) async {
     if (!_isLicenseActivated) {
       return;
     }
 
-    setState(() {
-      _isLoadingBooks = true;
-    });
+    if (mounted) setState(() => _isLoadingBooks = true);
+    await Future.delayed(Duration.zero); // Let loading indicator paint
 
     try {
-      // Verify storage is still connected before loading books
-      final storageConnected = await _checkStorageConnection();
+      final storageConnected = storageAlreadyChecked ?? await _checkStorageConnection();
       if (!storageConnected) {
         if (mounted) {
           setState(() {
             _isStorageConnected = false;
             _isLoadingBooks = false;
           });
-          // Re-check license status to show storage error
           _checkLicenseStatus();
         }
         return;
       }
 
-      // Load books from local database
-      
       final books = await DatabaseService.getAllBooks();
-      
-      
-      if (books.isEmpty) {
-      } else {
-        for (int i = 0; i < books.length; i++) {
-          final hasUrl = books[i].contentUrl != null && books[i].contentUrl!.isNotEmpty;
-        }
-      }
-      
+
       if (mounted) {
         setState(() {
           _books = books;
           _isStorageConnected = true;
           _isLoadingBooks = false;
         });
+        BookPreprocessService.preprocessBooks(books);
       }
-    } catch (e, stackTrace) {
-      // Use empty list on error
+    } catch (e) {
       if (mounted) {
         setState(() {
           _books = [];
@@ -369,11 +352,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final isActivated = prefs.getBool('licenseActivated') ?? false;
     final expiryDateStr = prefs.getString('licenseExpiryDate') ?? '';
     final syncCompleted = prefs.getBool('syncCompleted') ?? false;
-    
-    
-    // Check database status regardless of license
-    await DatabaseService.checkDatabaseStatus();
-    
+
     bool isValid = false;
     String? statusMessage;
     
@@ -445,7 +424,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Load books from database if license is activated AND sync is completed
     if (isValid && syncCompleted) {
-      _loadBooks();
+      _loadBooks(storageAlreadyChecked: storageConnected);
     } else {
       // Clear books if license is not valid or sync not completed
       setState(() {
@@ -477,11 +456,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Show empty state if license is not activated or storage not connected
     if (!_isLicenseActivated) {
-      // Check if it's a storage connection issue
-      final isStorageIssue = !_isStorageConnected && 
-                            _licenseStatusMessage != null && 
-                            _licenseStatusMessage!.contains('Storage device');
-      
       return Scaffold(
         appBar: AppBar(
           title: const Text('WebBooks Settings'),
@@ -496,10 +470,13 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icon(Icons.settings, color: _hasInternet ? null : Colors.grey),
               onPressed: _hasInternet
                   ? () async {
-                      final result = await Navigator.pushNamed(context, AppRoutes.settings);
-                      if (result == true || mounted) {
-                        _checkLicenseStatus();
+                      await Future.delayed(const Duration(milliseconds: 120));
+                      if (!mounted) return;
+                      await Navigator.pushNamed(context, AppRoutes.settings);
+                      if (mounted) {
                         _checkConnectivity();
+                        await _checkLicenseStatus();
+                        if (_isLicenseActivated) await _loadBooks();
                       }
                     }
                   : null,
@@ -560,10 +537,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       OutlinedButton.icon(
                         onPressed: _hasInternet
                             ? () async {
-                                final result = await Navigator.pushNamed(context, AppRoutes.settings);
-                                if (result == true || mounted) {
-                                  _checkLicenseStatus();
+                                await Future.delayed(const Duration(milliseconds: 120));
+                                if (!mounted) return;
+                                await Navigator.pushNamed(context, AppRoutes.settings);
+                                if (mounted) {
                                   _checkConnectivity();
+                                  await _checkLicenseStatus();
+                                  if (_isLicenseActivated) await _loadBooks();
                                 }
                               }
                             : null,
@@ -604,13 +584,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   ElevatedButton.icon(
                     onPressed: _hasInternet
                         ? () async {
-                            final result = await Navigator.pushNamed(context, AppRoutes.settings);
-                            if (result == true || mounted) {
-                              _checkLicenseStatus();
+                            await Future.delayed(const Duration(milliseconds: 120));
+                            if (!mounted) return;
+                            await Navigator.pushNamed(context, AppRoutes.settings);
+                            if (mounted) {
                               _checkConnectivity();
+                              await _checkLicenseStatus();
+                              if (_isLicenseActivated) await _loadBooks();
                             }
                           }
-                        : null,
+                          : null,
                     icon: Icon(Icons.settings, color: _hasInternet ? null : Colors.grey),
                     label: const Text('Go to Settings'),
                     style: ElevatedButton.styleFrom(
@@ -661,7 +644,9 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.settings, color: _hasInternet ? null : Colors.grey),
             onPressed: _hasInternet
                 ? () async {
-                    final result = await Navigator.pushNamed(context, AppRoutes.settings);
+                    await Future.delayed(const Duration(milliseconds: 120));
+                    if (!mounted) return;
+                    await Navigator.pushNamed(context, AppRoutes.settings);
                     if (mounted) {
                       _checkConnectivity();
                       await _checkLicenseStatus();
@@ -740,10 +725,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         )
                       : GridView.builder(
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 10,
-                        crossAxisSpacing: 8,
-                        mainAxisSpacing: 8,
-                        childAspectRatio: MediaQuery.sizeOf(context).width >= 600 ? 0.62 : 0.5,
+                        crossAxisCount: MediaQuery.sizeOf(context).width >= 600 ? 6 : 3,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                        childAspectRatio: MediaQuery.sizeOf(context).width >= 600 ? 0.58 : 0.52,
                       ),
                       itemCount: filtered.length,
                       itemBuilder: (_, i) => BookCard(book: filtered[i]),

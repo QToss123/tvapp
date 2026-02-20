@@ -8,6 +8,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../routes.dart';
 import '../widgets/file_browser.dart';
+import '../widgets/license_keyboard.dart';
 import '../services/api_service.dart';
 import '../services/database_service.dart';
 import '../utils/permission_helper.dart';
@@ -37,26 +38,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _syncType = 'online';
   String _storageLocation = 'Not selected';
   bool _tvCursorEnabled = true;
+  /// On Android: custom keyboard hidden until user taps license field
+  bool _showLicenseKeyboard = false;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _licenseFocusNode.addListener(_onLicenseFocusChange);
+    // Defer load so push completes and any prior teardown can settle (reduces random crash)
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future.delayed(const Duration(milliseconds: 80));
+      if (mounted) _load();
+    });
   }
 
   @override
   void dispose() {
+    _licenseFocusNode.removeListener(_onLicenseFocusChange);
     _licenseController.dispose();
     _licenseFocusNode.dispose();
     _activateButtonFocusNode.dispose();
     super.dispose();
   }
 
+  void _onLicenseFocusChange() {
+    if (_licenseFocusNode.hasFocus &&
+        Platform.isAndroid &&
+        !_isLicenseActivated &&
+        mounted) {
+      setState(() => _showLicenseKeyboard = true);
+    }
+  }
+
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     final tvCursor = prefs.getBool(_kTVCursorEnabled) ?? Platform.isAndroid;
     setState(() {
-      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'TES-CL159-S73-IYSFKUUJCL';
+      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'CLA-CL252-S71-UF4H021275';
       _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
       _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';
@@ -483,25 +501,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     // 2. Clear local database and delete DB file
     try {
-      final deletedCount = await DatabaseService.clearAllBooks();
+      await DatabaseService.clearAllBooks();
       await DatabaseService.close();
       final docDir = await getApplicationDocumentsDirectory();
       final dbFile = File(path.join(docDir.path, 'books.db'));
       if (await dbFile.exists()) {
         await dbFile.delete();
       }
-    } catch (e) {
-    }
+    } catch (e) { /* ignore */ }
 
     // 3. Clear all caches and WebView storage
     try {
       await DefaultCacheManager().emptyCache();
-    } catch (e) {
-    }
+    } catch (e) { /* ignore */ }
     try {
       await WebViewCookieManager().clearCookies();
-    } catch (e) {
-    }
+    } catch (e) { /* ignore */ }
     try {
       final tempDir = await getTemporaryDirectory();
       for (final dirName in ['decrypted_books', 'extracted_books']) {
@@ -578,8 +593,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }
         }
       }
-    } catch (e) {
-    }
+    } catch (e) { /* ignore */ }
 
     // 4. Clear SharedPreferences (all app data)
     await prefs.clear();
@@ -611,7 +625,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Shows configuration dialog after license activation
   /// Asks user to select storage location (sync is always online)
-  Future<void> _showConfigurationDialog() async {
+  Future<void> _showConfigurationDialog() async { // ignore: unused_element
     String? selectedLocation = _storageLocation != 'Not selected' ? _storageLocation : null;
 
     await showDialog(
@@ -693,6 +707,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // ignore: unused_element
   void _checkConfigComplete(String? location, Function(bool) callback) {
     callback(location != null &&
              location.isNotEmpty &&
@@ -709,8 +724,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (storageChanged) {
       try {
         await DatabaseService.clearAllBooks();
-      } catch (e) {
-      }
+      } catch (e) { /* ignore */ }
     }
   }
 
@@ -909,9 +923,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('WebBooks Settings')),
-      body: ListView(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        // Decide now so deferred callback doesn't see stale focus
+        final shouldUnfocusFirst = _licenseFocusNode.hasFocus;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!context.mounted) return;
+          if (shouldUnfocusFirst) {
+            FocusScope.of(context).unfocus();
+          } else {
+            Navigator.of(context).pop(true);
+          }
+        });
+      },
+      child: GestureDetector(
+        onTap: () {
+          FocusScope.of(context).unfocus();
+          if (Platform.isAndroid) setState(() => _showLicenseKeyboard = false);
+        },
+        behavior: HitTestBehavior.opaque,
+        child: Scaffold(
+          resizeToAvoidBottomInset: false,
+          appBar: AppBar(
+            title: const Text('WebBooks Settings'),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              tooltip: 'Back',
+              onPressed: () {
+                if (_licenseFocusNode.hasFocus) {
+                  FocusScope.of(context).unfocus();
+                } else {
+                  Navigator.of(context).pop(true);
+                }
+              },
+            ),
+          ),
+          body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           // License Number Section
@@ -936,10 +985,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           controller: _licenseController,
                           focusNode: _licenseFocusNode,
                           enabled: !_isLicenseActivated,
+                          readOnly: Platform.isAndroid && !_isLicenseActivated,
                           maxLength: 24,
                           decoration: InputDecoration(
                             labelText: 'Enter your license number',
-                            hintText: 'Enter your license number',
+                            hintText: Platform.isAndroid && !_isLicenseActivated
+                                ? 'Tap to open keyboard'
+                                : 'Enter your license number',
                             border: const OutlineInputBorder(),
                             prefixIcon: const Icon(Icons.vpn_key),
                             suffixIcon: _isLicenseActivated
@@ -979,6 +1031,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ],
                     ],
                   ),
+                  if (Platform.isAndroid &&
+                      !_isLicenseActivated &&
+                      _showLicenseKeyboard) ...[
+                    const SizedBox(height: 12),
+                    LicenseKeyboard(
+                      controller: _licenseController,
+                      maxLength: 24,
+                    ),
+                  ],
                   // Expiry date display removed per P1 (remove from installer/settings)
                   if (_isLicenseActivated) ...[
                     const SizedBox(height: 8),
@@ -1165,6 +1226,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
         ],
       ),
-    );
+        ), // Scaffold
+      ), // GestureDetector
+    ); // PopScope
   }
 }

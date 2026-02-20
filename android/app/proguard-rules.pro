@@ -40,3 +40,6 @@
 # Cryptography / crypto plugins used by book decryption
 -keep class androidx.security.crypto.** { *; }
 -dontwarn javax.annotation.**
+
+# cryptography_flutter - native AES-GCM, prevent stripping
+-keep class dev.dint.cryptography_flutter.** { *; }

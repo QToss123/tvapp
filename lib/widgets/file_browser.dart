@@ -228,15 +228,12 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
                     displayPath: fullPath,
                   ));
                 }
-              } catch (e) {
-              }
+              } catch (e) { /* ignore */ }
             }
           }
-        } catch (e) {
-        }
+        } catch (e) { /* ignore */ }
       }
-    } catch (e) {
-    }
+    } catch (e) { /* ignore */ }
 
     // Android TV / OEM-specific USB mount points
     final androidUsbRoots = [
@@ -262,7 +259,7 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
                 displayPath: root,
               ));
             }
-          } catch (_) {}
+          } catch (_) { /* ignore */ }
           // Also list subdirs (e.g. /mnt/usb/sda1)
           try {
             await for (final entity in dir.list()) {
@@ -279,12 +276,12 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
                       displayPath: fullPath,
                     ));
                   }
-                } catch (_) {}
+                } catch (_) { /* ignore */ }
               }
             }
-          } catch (_) {}
+          } catch (_) { /* ignore */ }
         }
-      } catch (_) {}
+      } catch (_) { /* ignore */ }
     }
     
     // Check /storage for mounted devices (including USB drives)
@@ -333,12 +330,9 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
               }
             }
           }
-        } catch (e) {
-        }
-      } else {
+        } catch (e) { /* ignore */ }
       }
-    } catch (e) {
-    }
+    } catch (e) { /* ignore */ }
     
     // On Android, always add "Browse All Storage Devices" first so user can
     // manually navigate to /storage and find USB drives (required in release APK)
@@ -353,8 +347,7 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
             displayPath: '/storage',
           ));
         }
-      } catch (e) {
-      }
+      } catch (e) { /* ignore */ }
     } else {
       final hasExternal = locations.any((loc) => !loc.isInternal);
       if (!hasExternal) {
@@ -368,8 +361,7 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
               displayPath: '/storage',
             ));
           }
-        } catch (e) {
-        }
+        } catch (e) { /* ignore */ }
       }
     }
     
@@ -422,7 +414,8 @@ class _FileBrowserState extends State<FileBrowser> with WidgetsBindingObserver {
     }
   }
 
-  /// Finds the first accessible storage path, prioritizing USB drives
+  /// Finds the first accessible storage path, prioritizing USB drives.
+  // ignore: unused_element
   Future<String?> _findAccessibleStoragePath() async {
     // First, try to find USB drives in /storage (most common location)
     try {

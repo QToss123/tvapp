@@ -7,7 +7,6 @@ import 'package:cryptography_flutter/cryptography_flutter.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:webview_win_floating/webview_plugin.dart';
 import 'app.dart';
-import 'services/api_service.dart';
 import 'services/background_sync_service.dart';
 
 void main() async {
@@ -36,16 +35,19 @@ void _deferredInit() {
     if (FlutterCryptography.isPluginPresent) {
       Cryptography.instance = FlutterCryptography.defaultInstance;
     }
-  } catch (e) {
-  }
-  if (Platform.isAndroid) {
+  } catch (e, st) {
+    debugPrint('[Main] CryptographyFlutter init failed: $e\n$st');
   }
   try {
     if (Platform.isAndroid) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      initWorkManager().catchError((e, st) {
+        debugPrint('[Main] initWorkManager failed: $e\n$st');
+      });
     } else if (Platform.isWindows || Platform.isLinux) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
-  } catch (e) {
+  } catch (e, st) {
+    debugPrint('[Main] SystemChrome failed: $e\n$st');
   }
 }

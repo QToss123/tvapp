@@ -496,7 +496,7 @@ class ApiService {
           };
         }
       }
-    } catch (e, st) {
+    } catch (e) {
       return {
         'success': false,
         'message': 'Network error: $e',

@@ -1,16 +1,17 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
 
 /// Downloads and caches book thumbnails locally for offline use.
 class ThumbnailHelper {
   /// Downloads thumbnail from [url] and saves to [thumbnailsDir] with filename based on [id].
+  /// Streams to file to avoid loading entire image in memory (OOM fix).
   /// Returns the local file path on success, null on failure.
   static Future<String?> downloadAndSave(
     String url, {
     required String thumbnailsDir,
     required String id,
+    int maxSizeBytes = 5 * 1024 * 1024, // 5 MB limit for thumbnails
   }) async {
     if (url.isEmpty || !url.startsWith('http')) return null;
     try {
@@ -23,15 +24,31 @@ class ThumbnailHelper {
       final filePath = path.join(thumbnailsDir, fileName);
       final file = File(filePath);
 
-      final response = await http.get(Uri.parse(url)).timeout(
-        const Duration(seconds: 15),
-        onTimeout: () {
-          throw Exception('Timeout');
-        },
-      );
-      if (response.statusCode != 200) return null;
+      final request = await http.Client()
+          .send(http.Request('GET', Uri.parse(url)))
+          .timeout(
+            const Duration(seconds: 15),
+            onTimeout: () {
+              throw Exception('Timeout');
+            },
+          );
+      if (request.statusCode != 200) return null;
 
-      await file.writeAsBytes(response.bodyBytes);
+      final sink = file.openWrite();
+      var totalBytes = 0;
+      try {
+        await for (final chunk in request.stream) {
+          totalBytes += chunk.length;
+          if (totalBytes > maxSizeBytes) {
+            await sink.close();
+            await file.delete();
+            return null; // Abort if too large (avoid OOM)
+          }
+          sink.add(chunk);
+        }
+      } finally {
+        await sink.close();
+      }
       return filePath;
     } catch (e) {
       return null;

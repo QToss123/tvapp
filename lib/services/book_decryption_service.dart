@@ -2,8 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
-import 'package:cryptography_flutter/cryptography_flutter.dart';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
 
@@ -66,7 +64,11 @@ Future<String> decryptOnDiskBackground(DecryptOnDiskParams p) async {
 
 /// Service for downloading and decrypting encrypted books from the API.
 /// Uses [cryptography] + [cryptography_flutter] for native AES-GCM (~50x faster on Android).
+/// File size guard prevents OOM on large files (AES-GCM requires full ciphertext in memory).
 class BookDecryptionService {
+  /// Max size (bytes) for decryption - avoid OOM on low-memory devices (e.g. TV).
+  static const int _maxDecryptFileSizeBytes = 150 * 1024 * 1024; // 150 MB
+
   static const String _masterKeyB64 =
       'p4wZbM9kqFv6QzQhM0xA2G9Pz0x0QnH2xX3B6YkJQzE=';
 
@@ -90,6 +92,12 @@ class BookDecryptionService {
     final tempPath = await _downloadToFile(downloadUrl, onProgress);
     final tempFile = File(tempPath);
     final encryptedLength = await tempFile.length();
+    if (encryptedLength > _maxDecryptFileSizeBytes) {
+      try { await tempFile.delete(); } catch (_) {}
+      throw Exception(
+        'Downloaded file too large to decrypt on this device (${(encryptedLength / (1024 * 1024)).toStringAsFixed(1)} MB). Maximum supported: ${_maxDecryptFileSizeBytes ~/ (1024 * 1024)} MB.',
+      );
+    }
 
     final contentKey = await _decryptContentKey(
       keyEncB64: keyEncB64,
@@ -130,6 +138,12 @@ class BookDecryptionService {
       if (!await encryptedFile.exists()) {
         throw Exception('Encrypted file not found: $encryptedFilePath');
       }
+      final fileSize = await encryptedFile.length();
+      if (fileSize > _maxDecryptFileSizeBytes) {
+        throw Exception(
+          'File too large to decrypt on this device (${(fileSize / (1024 * 1024)).toStringAsFixed(1)} MB). Maximum supported: ${_maxDecryptFileSizeBytes ~/ (1024 * 1024)} MB.',
+        );
+      }
 
       final encryptedBytes = await encryptedFile.readAsBytes();
 
@@ -151,7 +165,7 @@ class BookDecryptionService {
       if (await outFile.exists()) await outFile.delete();
       await outFile.writeAsBytes(decryptedBytes);
       return outputFilePath;
-    } catch (e, st) {
+    } catch (e) {
       if (e is Exception) rethrow;
       throw Exception('Decryption failed: $e');
     }
@@ -227,7 +241,7 @@ class BookDecryptionService {
             'Decrypted content key must be 32 bytes, got ${decrypted.length}');
       }
       return Uint8List.fromList(decrypted);
-    } catch (e, st) {
+    } catch (e) {
       if (e is Exception) rethrow;
       throw Exception('Content key decryption failed: $e');
     }
@@ -254,7 +268,7 @@ class BookDecryptionService {
         aad: [],
       );
       return Uint8List.fromList(decrypted);
-    } catch (e, st) {
+    } catch (e) {
       if (e is Exception) rethrow;
       throw Exception('File decryption failed: $e');
     }

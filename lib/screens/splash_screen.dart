@@ -25,8 +25,8 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
     
-    // Check license activation and expiry
-    final bool licenseValid = await _isLicenseValid();
+    // Check license activation and expiry (result used for future navigation logic)
+    await _isLicenseValid();
     
     if (!mounted) {
       return;
@@ -72,7 +72,7 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.white,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -81,19 +81,19 @@ class _SplashScreenState extends State<SplashScreen> {
               'assets/app_icon.png',
               width: 200,
               fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const Text(
+              errorBuilder: (_, error, stackTrace) => const Text(
                 'BurlingtonEnglish',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.w600,
-                  color: Colors.white,
+                  color: Colors.black87,
                 ),
               ),
             ),
             const SizedBox(height: 24),
             const Text(
               'Loading...',
-              style: TextStyle(fontSize: 14, color: Colors.white70),
+              style: TextStyle(fontSize: 14, color: Colors.black54),
             ),
           ],
         ),

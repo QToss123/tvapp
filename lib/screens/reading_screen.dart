@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import '../models/book.dart';
 import '../utils/zip_handler.dart';
@@ -83,8 +82,16 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
   @override
   void dispose() {
-    // Stop local HTTP server
-    _stopLocalServer();
+    // Defer server close so WebView can finish teardown first (reduces crash on Back)
+    final server = _localServer;
+    _localServer = null;
+    if (server != null) {
+      Future.delayed(const Duration(milliseconds: 1200), () async {
+        try {
+          await server.close(force: true);
+        } catch (_) { /* ignore */ }
+      });
+    }
     // Delete decrypted file from app cache (best-effort)
     if (_decryptedCachePath != null) {
       try {
@@ -92,8 +99,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         if (f.existsSync()) {
           f.deleteSync();
         }
-      } catch (e) {
-      }
+      } catch (e) { /* ignore */ }
     }
     // Dispose focus node
     _webViewFocusNode.dispose();
@@ -126,8 +132,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
       }
       
       await _controller.runJavaScript(jsCode);
-    } catch (e) {
-    }
+    } catch (e) { /* ignore */ }
   }
 
   /// Builds WebView for desktop (Windows/Linux). On Linux, adds keyboard scroll
@@ -179,12 +184,11 @@ class _ReadingScreenState extends State<ReadingScreen> {
         })();
       ''';
       await _controller.runJavaScript(js);
-    } catch (e) {
-    }
+    } catch (e) { /* ignore */ }
   }
 
-  /// Injects fixes for page-jump input (Enter to apply) and responsive zoom.
-  /// Runs on every page load regardless of TV cursor.
+  /// Injects fixes for page-jump input (Enter to apply), responsive zoom,
+  /// and optionally hides Flash/SoundManager diagnostic (WebView has no Flash).
   Future<void> _injectBookFixes() async {
     try {
       const jsCode = r'''
@@ -212,11 +216,24 @@ class _ReadingScreenState extends State<ReadingScreen> {
             '#reader-view { padding-bottom: 0 !important; }'
           ].join('\n');
           if (!document.getElementById('reader-responsive-fixes')) document.head.appendChild(s);
+          var walk = function(el, fn) {
+            if (!el) return;
+            if (fn(el)) return;
+            var ch = el.children;
+            for (var i = 0; ch && i < ch.length; i++) walk(ch[i], fn);
+          };
+          walk(document.body, function(el) {
+            var t = (el.innerText || el.textContent || '').toLowerCase();
+            if (t.indexOf('flash options') !== -1 && t.indexOf('soundmanager') !== -1) {
+              el.style.display = 'none';
+              return true;
+            }
+            return false;
+          });
         })();
       ''';
       await _controller.runJavaScript(jsCode);
-    } catch (e) {
-    }
+    } catch (e) { /* ignore */ }
   }
 
   /// Injects JavaScript: visible TV cursor, focus styles, and prev/next mapping
@@ -268,8 +285,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         })();
       ''';
       await _controller.runJavaScript(jsCode);
-    } catch (e) {
-    }
+    } catch (e) { /* ignore */ }
   }
 
   /// Stops the local HTTP server
@@ -278,8 +294,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
       try {
         await _localServer!.close(force: true);
         _localServer = null;
-      } catch (e) {
-      }
+      } catch (e) { /* ignore */ }
     }
   }
 
@@ -339,33 +354,32 @@ class _ReadingScreenState extends State<ReadingScreen> {
         ),
       );
 
-    // Load book content URL or show a placeholder
-    if (widget.book.contentUrl != null && widget.book.contentUrl!.isNotEmpty) {
-      final originalUrl = widget.book.contentUrl!;
-      final contentUrl = _normalizeContentUrl(originalUrl);
-      
-      
-      // Check if it's a local asset (starts with 'assets/')
-      if (contentUrl.startsWith('assets/')) {
-        _loadAsset(contentUrl);
-      } else if (contentUrl.startsWith('file://')) {
-        // Local file system (including external storage like USB drives)
-        _loadFile(contentUrl);
-      } else if (contentUrl.startsWith('http://') || contentUrl.startsWith('https://')) {
-        // Network URL
-        _controller.loadRequest(Uri.parse(contentUrl));
-      } else {
-        // Try as asset first, then as network URL
-        _loadAsset(contentUrl);
-      }
-    } else {
-      // No contentUrl (e.g. book not downloaded yet). Avoid loadHtmlString - it
-      // uses loadDataWithBaseURL which crashes on some Android TV WebViews (MiTV etc).
+    // Defer load so first frame paints (loading indicator) and UI thread stays responsive (avoids ANR)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _startLoadingContent();
+    });
+  }
+
+  void _startLoadingContent() {
+    if (widget.book.contentUrl == null || widget.book.contentUrl!.isEmpty) {
       _controller.loadRequest(Uri.parse('about:blank'));
       setState(() {
         _isLoading = false;
         _error = 'Not ready. Go to Sync to download first.';
       });
+      return;
+    }
+    final originalUrl = widget.book.contentUrl!;
+    final contentUrl = _normalizeContentUrl(originalUrl);
+    if (contentUrl.startsWith('assets/')) {
+      _loadAsset(contentUrl);
+    } else if (contentUrl.startsWith('file://')) {
+      _loadFile(contentUrl);
+    } else if (contentUrl.startsWith('http://') || contentUrl.startsWith('https://')) {
+      _controller.loadRequest(Uri.parse(contentUrl));
+    } else {
+      _loadAsset(contentUrl);
     }
   }
 
@@ -476,101 +490,27 @@ class _ReadingScreenState extends State<ReadingScreen> {
     return filePath;
   }
 
-  /// Loads a file from external storage (USB drive, SD card, etc.)
-  /// Copies the book folder to internal storage first, then loads from there
-  /// This bypasses Android 10+ file:// access restrictions
-  /// Cleans up the copied folder when done
+  /// Loads a file from external storage. Uses in-screen loader only (no blocking dialog).
+  /// Loader is cleared when WebView finishes loading (onPageFinished).
   Future<void> _loadFile(String fileUrl) async {
-    bool dialogOpen = false;
-    bool errorShownInDialog = false;
-    String? dialogError;
-    StateSetter? dialogSetState;
-    Future<void> updateDialog({
-      required String stepKey,
-      required String message,
-      String? error,
-    }) async {
-      dialogError = error;
-      if (!mounted) return;
-      if (!dialogOpen) {
-        dialogOpen = true;
-        // ignore: use_build_context_synchronously
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (dialogContext) {
-            final navigator = Navigator.of(dialogContext);
-            return StatefulBuilder(
-              builder: (context, setState) {
-                dialogSetState = setState;
-                return AlertDialog(
-                  title: const Text('Opening book'),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      const Text(
-                        'Opening the book, Please wait.',
-                        style: TextStyle(fontSize: 16),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 20),
-                      const LinearProgressIndicator(minHeight: 4),
-                      if (dialogError != null) ...[
-                        const SizedBox(height: 16),
-                        Text(
-                          dialogError!,
-                          style: const TextStyle(color: Colors.red, fontSize: 14),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ],
-                  ),
-                  actions: dialogError != null
-                      ? [
-                          TextButton(
-                            onPressed: () {
-                              Navigator.pop(dialogContext);
-                              navigator.pop();
-                            },
-                            child: const Text('Close'),
-                          ),
-                        ]
-                      : const [],
-                );
-              },
-            );
-          },
-        );
-      } else {
-        if (dialogSetState != null) {
-          dialogSetState!(() {});
-        }
-      }
+    if (mounted) setState(() { _isLoading = true; _error = null; });
+    await Future.delayed(Duration.zero); // Let loading indicator paint before heavy work
+
+    void showErr(String message) {
+      if (mounted) setState(() { _isLoading = false; _error = message; });
     }
 
     try {
       await _loadTvCursorSetting();
 
-      // Parse file:// URL to native path (Windows: /D:/path -> D:\path)
       var filePath = _fileUrlToPath(fileUrl);
       var file = File(filePath);
-      
-      // Check if file exists
-      await updateDialog(stepKey: 'Checking file', message: 'Checking file...');
+
+      await Future.delayed(const Duration(milliseconds: 50));
       final fileExists = await file.exists();
 
-      // Log encrypted file existence on open (both success and failure)
-      final isZip = filePath.toLowerCase().endsWith('.zip');
-      if (isZip) {
-      }
-
       if (!fileExists) {
-        await updateDialog(
-          stepKey: 'Checking file',
-          message: '',
-          error: 'File not found.',
-        );
+        showErr('File not found.');
         return;
       }
 
@@ -588,15 +528,12 @@ class _ReadingScreenState extends State<ReadingScreen> {
           (encKeyB64 != null && encKeyB64.isNotEmpty) ||
           (encNonceB64 != null && encNonceB64.isNotEmpty);
       if (hasEncMeta) {
-        final decryptedAvailable = await isDecryptedFileAvailable(
+        await isDecryptedFileAvailable(
           encryptedFilePath: filePath,
           encBookId: encBookId ?? '',
         );
 
-        await updateDialog(
-          stepKey: 'Decrypting',
-          message: decryptedAvailable ? 'Using decrypted file...' : 'Decrypting encrypted file...',
-        );
+        await Future.delayed(const Duration(milliseconds: 50));
         try {
           final result = await decryptBookFileIfNeeded(
             encryptedFilePath: filePath,
@@ -607,41 +544,19 @@ class _ReadingScreenState extends State<ReadingScreen> {
           filePath = result.pathToUse;
           _decryptedCachePath = result.pathToUse;
           file = File(filePath);
-          final decryptedSize = await file.length();
-
-          if (result.reusedExisting) {
-            await updateDialog(
-              stepKey: 'Decrypting',
-              message: 'Decrypt complete (reused, $decryptedSize bytes)',
-            );
-          } else {
-            await updateDialog(
-              stepKey: 'Decrypting',
-              message: 'Decrypt complete ($decryptedSize bytes)',
-            );
-          }
-        } catch (e, st) {
-          await updateDialog(
-            stepKey: 'Decrypting',
-            message: '',
-            error: 'Incorrect format.',
-          );
+        } catch (e) {
+          showErr('Incorrect format.');
           return;
         }
       }
-      
-      // Check if file is a ZIP and extract it if necessary
-      await updateDialog(stepKey: 'Unzipping', message: 'Unzipping book...');
+
+      await Future.delayed(const Duration(milliseconds: 50));
       ({String path, bool wasExtracted}) processed;
       try {
-        processed = await ZipHandler.processBookFile(filePath);
+        processed = await ZipHandler.processBookFileOffMain(filePath);
         filePath = processed.path;
       } on FormatException catch (_) {
-        await updateDialog(
-          stepKey: 'Unzipping',
-          message: '',
-          error: 'Incorrect format.',
-        );
+        showErr('Incorrect format.');
         return;
       }
       
@@ -674,10 +589,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
         throw Exception('Path is neither a file nor a directory: $filePath');
       }
       
-      
-      await updateDialog(stepKey: 'Starting reader', message: 'Starting reader...');
+      await Future.delayed(const Duration(milliseconds: 50));
 
-      // Always start server (needed for Android/Windows; kept ready for Linux fallback)
       await _startLocalServer(bookDirectory);
       final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path);
       final urlPath = relativePath.replaceAll('\\', '/');
@@ -691,12 +604,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       } else {
         _linuxHttpFallbackUrl = null;
         bookUrl = httpUrl;
-      }
-
-      // Close "Opening book" dialog before loading so we don't appear stuck if loadRequest is slow (e.g. Android TV WebView)
-      if (mounted && dialogOpen && Navigator.canPop(context)) {
-        Navigator.pop(context);
-        dialogOpen = false;
       }
 
       if (Platform.isLinux || Platform.isWindows) {
@@ -724,7 +631,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
           }
         });
       }
-    } catch (e, st) {
+    } catch (e) {
       await _stopLocalServer();
       if (mounted) {
         final errorStr = e.toString().toLowerCase();
@@ -738,17 +645,76 @@ class _ReadingScreenState extends State<ReadingScreen> {
             errorStr.contains('index.html');
         final String friendlyMessage =
             isFormatOrDecrypt ? 'Incorrect format.' : 'This file could not be opened.';
-        await updateDialog(
-          stepKey: 'Checking file',
-          message: '',
-          error: friendlyMessage,
-        );
-        errorShownInDialog = true;
+        setState(() { _isLoading = false; _error = friendlyMessage; });
       }
-    } finally {
-      if (mounted && !errorShownInDialog && dialogOpen && Navigator.canPop(context)) {
-        Navigator.pop(context);
+    }
+  }
+
+  /// Resolves path case-insensitively so "css/file.css" finds "CSS/file.css" on Android.
+  static Future<String?> _resolvePathCaseInsensitive(Directory dir, String relativePath) async {
+    final parts = relativePath.replaceAll('\\', '/').split('/').where((s) => s.isNotEmpty).toList();
+    if (parts.isEmpty) return null;
+    String currentPath = dir.path;
+    for (int i = 0; i < parts.length; i++) {
+      final currentDir = Directory(currentPath);
+      final name = parts[i];
+      final direct = File(path.join(currentPath, name));
+      if (await direct.exists()) {
+        currentPath = direct.path;
+        continue;
       }
+      String? found;
+      await for (final entity in currentDir.list(followLinks: false)) {
+        if (entity.path.split(path.separator).last.toLowerCase() == name.toLowerCase()) {
+          found = entity.path;
+          break;
+        }
+      }
+      if (found == null) return null;
+      currentPath = found;
+    }
+    return currentPath;
+  }
+
+  /// Returns correct MIME type string so browsers accept CSS/JS (strict MIME checking).
+  static String _mimeTypeForExtension(String ext) {
+    switch (ext) {
+      case '.html':
+      case '.htm':
+        return 'text/html; charset=utf-8';
+      case '.css':
+        return 'text/css; charset=utf-8';
+      case '.js':
+        return 'application/javascript; charset=utf-8';
+      case '.json':
+        return 'application/json; charset=utf-8';
+      case '.png':
+        return 'image/png';
+      case '.jpg':
+      case '.jpeg':
+        return 'image/jpeg';
+      case '.gif':
+        return 'image/gif';
+      case '.svg':
+        return 'image/svg+xml';
+      case '.webp':
+        return 'image/webp';
+      case '.mp3':
+        return 'audio/mpeg';
+      case '.mp4':
+        return 'video/mp4';
+      case '.wav':
+        return 'audio/wav';
+      case '.woff':
+        return 'font/woff';
+      case '.woff2':
+        return 'font/woff2';
+      case '.ttf':
+        return 'font/ttf';
+      case '.xml':
+        return 'application/xml; charset=utf-8';
+      default:
+        return 'application/octet-stream';
     }
   }
 
@@ -775,89 +741,59 @@ class _ReadingScreenState extends State<ReadingScreen> {
     // Handle incoming requests
     _localServer!.listen((HttpRequest request) async {
       try {
-        // Get the requested path
+        // Get and normalize the requested path (decode URI, block traversal)
         var requestedPath = request.uri.path;
-        // Remove leading slash
         if (requestedPath.startsWith('/')) {
           requestedPath = requestedPath.substring(1);
         }
-        
-        // If root path, serve index.html
+        requestedPath = Uri.decodeComponent(requestedPath);
+        if (requestedPath.contains('..')) {
+          request.response
+            ..statusCode = HttpStatus.badRequest
+            ..headers.set('Content-Type', 'text/plain; charset=utf-8')
+            ..write('Invalid path')
+            ..close();
+          return;
+        }
         if (requestedPath.isEmpty || requestedPath == '/') {
           requestedPath = 'index.html';
         }
-        
-        // Build full file path
-        final filePath = path.join(bookDirectory.path, requestedPath);
-        final file = File(filePath);
-        
-        
-        if (await file.exists()) {
-          // Determine content type
-          String contentType = 'application/octet-stream';
-          final ext = path.extension(filePath).toLowerCase();
-          switch (ext) {
-            case '.html':
-              contentType = 'text/html; charset=utf-8';
-              break;
-            case '.css':
-              contentType = 'text/css; charset=utf-8';
-              break;
-            case '.js':
-              contentType = 'application/javascript; charset=utf-8';
-              break;
-            case '.json':
-              contentType = 'application/json; charset=utf-8';
-              break;
-            case '.png':
-              contentType = 'image/png';
-              break;
-            case '.jpg':
-            case '.jpeg':
-              contentType = 'image/jpeg';
-              break;
-            case '.gif':
-              contentType = 'image/gif';
-              break;
-            case '.svg':
-              contentType = 'image/svg+xml';
-              break;
-            case '.mp3':
-              contentType = 'audio/mpeg';
-              break;
-            case '.mp4':
-              contentType = 'video/mp4';
-              break;
-            case '.woff':
-              contentType = 'font/woff';
-              break;
-            case '.woff2':
-              contentType = 'font/woff2';
-              break;
-            case '.ttf':
-              contentType = 'font/ttf';
-              break;
+
+        var filePath = path.join(bookDirectory.path, requestedPath);
+        var file = File(filePath);
+        if (!await file.exists()) {
+          final resolved = await _resolvePathCaseInsensitive(bookDirectory, requestedPath);
+          if (resolved != null) {
+            filePath = resolved;
+            file = File(filePath);
           }
-          
-          // Read and serve file
+        }
+
+        if (await file.exists()) {
+          var ext = path.extension(filePath).toLowerCase();
+          if (ext.isEmpty && requestedPath.contains('.')) {
+            ext = '.${requestedPath.split('.').last.toLowerCase()}';
+          }
+          final String mimeStr = _mimeTypeForExtension(ext);
+
           final fileBytes = await file.readAsBytes();
-          request.response
-            ..headers.contentType = ContentType.parse(contentType)
-            ..headers.contentLength = fileBytes.length
-            ..add(fileBytes)
-            ..close();
-          
+          final response = request.response;
+          response.headers.set('Content-Type', mimeStr);
+          response.headers.contentType = ContentType.parse(mimeStr);
+          response.headers.contentLength = fileBytes.length;
+          response.add(fileBytes);
+          response.close();
         } else {
-          // File not found
           request.response
             ..statusCode = HttpStatus.notFound
+            ..headers.set('Content-Type', 'text/plain; charset=utf-8')
             ..write('File not found: ${request.uri.path}')
             ..close();
-          
         }
       } catch (e) {
         request.response
           ..statusCode = HttpStatus.internalServerError
+          ..headers.set('Content-Type', 'text/plain; charset=utf-8')
           ..write('Server error: $e')
           ..close();
       }
@@ -865,6 +801,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
     
   }
 
+  // ignore: unused_element
   String _getPlaceholderHtml() {
     return '''
     <!DOCTYPE html>
@@ -901,10 +838,32 @@ class _ReadingScreenState extends State<ReadingScreen> {
     final useAppBarForBack = Platform.isWindows || Platform.isLinux;
 
     return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, result) {
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        Navigator.maybePop(context);
+        // Stop all HTML5 audio/video from JS first so AAudio is released before teardown (reduces crash)
+        try {
+          await _controller.runJavaScript('''
+            (function(){
+              try {
+                var el = document.querySelectorAll("audio, video");
+                for (var i = 0; i < el.length; i++) {
+                  el[i].pause();
+                  el[i].currentTime = 0;
+                  el[i].removeAttribute("src");
+                  el[i].load();
+                }
+              } catch(e) {}
+            })();
+          ''');
+        } catch (_) { /* ignore */ }
+        await Future.delayed(const Duration(milliseconds: 150));
+        try {
+          await _controller.loadRequest(Uri.parse('about:blank'));
+        } catch (_) { /* ignore */ }
+        await Future.delayed(const Duration(milliseconds: 600));
+        if (!context.mounted) return;
+        Navigator.of(context).pop();
       },
       child: Scaffold(
         appBar: useAppBarForBack
@@ -1003,14 +962,47 @@ class _ReadingScreenState extends State<ReadingScreen> {
                   : _buildDesktopWebView(),
             if (_isLoading && _error == null)
               Container(
-                color: Colors.white,
-                child: const Center(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white,
+                      Colors.grey.shade50,
+                    ],
+                  ),
+                ),
+                child: Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Loading book content...'),
+                      SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Theme.of(context).colorScheme.primary.withValues(alpha: 0.8),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        'Loading book content...',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade800,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Preparing your reading experience',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.grey.shade600,
+                          fontSize: 14,
+                        ),
+                      ),
                     ],
                   ),
                 ),
