@@ -29,7 +29,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const _kSyncType = 'syncType';
   static const _kStorageLocation = 'storageLocation';
   static const _kSyncCompleted = 'syncCompleted';
-  static const _kTVCursorEnabled = 'tv_cursor_enabled';
 
   final TextEditingController _licenseController = TextEditingController();
   final FocusNode _licenseFocusNode = FocusNode();
@@ -37,7 +36,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isLicenseActivated = false;
   String _syncType = 'online';
   String _storageLocation = 'Not selected';
-  bool _tvCursorEnabled = true;
   /// On Android: custom keyboard hidden until user taps license field
   bool _showLicenseKeyboard = false;
 
@@ -72,13 +70,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
-    final tvCursor = prefs.getBool(_kTVCursorEnabled) ?? Platform.isAndroid;
     setState(() {
       _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'CLA-CL251-S71-WYVPXTFSFZ';
       _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
       _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';
-      _tvCursorEnabled = tvCursor;
     });
   }
 
@@ -403,8 +399,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setString(_kStorageLocation, _storageLocation);
     
     if (mounted) {
-      // Navigate to sync screen instead of home
-      Navigator.pushReplacementNamed(context, AppRoutes.sync);
+      // Push sync on stack so Back from sync returns to Settings
+      Navigator.pushNamed(context, AppRoutes.sync);
     }
   }
 
@@ -604,7 +600,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _isLicenseActivated = false;
       _syncType = 'online';
       _storageLocation = 'Not selected';
-      _tvCursorEnabled = Platform.isAndroid;
     });
 
 
@@ -738,9 +733,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setBool(_kSyncCompleted, false);
     
     if (mounted) {
-      // Navigate to sync screen - this will replace the current route
-      // So user cannot go back to settings without completing sync
-      Navigator.pushReplacementNamed(context, AppRoutes.sync);
+      // Push sync on stack so Back from sync returns to Settings
+      Navigator.pushNamed(context, AppRoutes.sync);
     }
   }
 
@@ -1153,48 +1147,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
-          if (Platform.isAndroid) ...[
-            const SizedBox(height: 16),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Reading / TV',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Show TV navigation cursor (D-pad overlay)',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey.shade800,
-                            ),
-                          ),
-                        ),
-                        Switch(
-                          value: _tvCursorEnabled,
-                          onChanged: (bool value) async {
-                            setState(() => _tvCursorEnabled = value);
-                            final prefs = await SharedPreferences.getInstance();
-                            await prefs.setBool(_kTVCursorEnabled, value);
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
           const SizedBox(height: 24),
 
           // Action Buttons

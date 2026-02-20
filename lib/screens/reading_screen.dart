@@ -34,6 +34,7 @@ class ReadingScreen extends StatefulWidget {
   State<ReadingScreen> createState() => _ReadingScreenState();
 }
 
+// No history for reader: we do not save or restore reading position/progress.
 class _ReadingScreenState extends State<ReadingScreen> {
   static const _kTVCursorEnabled = 'tv_cursor_enabled';
 
@@ -890,6 +891,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         await _performBack();
       },
       child: Scaffold(
+        backgroundColor: Colors.white,
         appBar: useAppBarForBack
             ? AppBar(
                 backgroundColor: Colors.black87,
@@ -987,16 +989,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
                   : _buildDesktopWebView(),
             if (_isLoading && _error == null)
               Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white,
-                      Colors.grey.shade50,
-                    ],
-                  ),
-                ),
+                color: Colors.white,
                 child: Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,

@@ -503,10 +503,9 @@ class _SyncScreenState extends State<SyncScreen> {
               Row(
                 children: [
                   Expanded(
-                    child: ElevatedButton.icon(
+                    child: ElevatedButton(
                       onPressed: _runDownloadsNow,
-                      icon: const Icon(Icons.download, size: 20),
-                      label: Text(
+                      child: Text(
                         'Download (${_syncItems.length} books)',
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
@@ -518,7 +517,7 @@ class _SyncScreenState extends State<SyncScreen> {
                   if (Platform.isAndroid) ...[
                     const SizedBox(width: 12),
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: OutlinedButton(
                         onPressed: () async {
                           await enqueueBackgroundSync(_allCoursesForSync);
                           if (!mounted) return;
@@ -532,8 +531,7 @@ class _SyncScreenState extends State<SyncScreen> {
                           );
                           _closeOrGoToBookshelf();
                         },
-                        icon: const Icon(Icons.cloud_download, size: 20),
-                        label: const Text('Sync in background', style: TextStyle(fontWeight: FontWeight.w600)),
+                        child: const Text('Sync in background', style: TextStyle(fontWeight: FontWeight.w600)),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                         ),
@@ -614,7 +612,7 @@ class _SyncScreenState extends State<SyncScreen> {
       widget.onClose?.call();
       if (mounted) Navigator.pop(context);
     } else {
-      Navigator.pushReplacementNamed(context, AppRoutes.home);
+      if (mounted) Navigator.pop(context);
     }
   }
 

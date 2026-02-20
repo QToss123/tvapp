@@ -292,10 +292,23 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       final books = await DatabaseService.getAllBooks();
+      // No history for reader: show all books with zero progress
+      final booksNoHistory = books.map((b) => Book(
+        title: b.title,
+        author: b.author,
+        progress: 0,
+        thumbnail: b.thumbnail,
+        thumbnailLocalPath: b.thumbnailLocalPath,
+        contentUrl: b.contentUrl,
+        encBookId: b.encBookId,
+        encBookPath: b.encBookPath,
+        encKeyB64: b.encKeyB64,
+        encNonceB64: b.encNonceB64,
+      )).toList();
 
       if (mounted) {
         setState(() {
-          _books = books;
+          _books = booksNoHistory;
           _isStorageConnected = true;
           _isLoadingBooks = false;
         });
@@ -441,6 +454,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _openDownloadPanel() async {
     if (!mounted) return;
+    // Re-check internet so download is disabled when offline (e.g. Windows DNS cache)
+    final hasInternet = await ConnectivityHelper.hasInternetConnection();
+    if (mounted && !hasInternet) {
+      setState(() => _hasInternet = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Internet connection required to download books.'),
+          duration: Duration(seconds: 3),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    if (!mounted) return;
     await Navigator.pushNamed(context, AppRoutes.sync);
   }
 
@@ -458,11 +485,6 @@ class _HomeScreenState extends State<HomeScreen> {
         appBar: AppBar(
           title: const Text('WebBooks Settings'),
           actions: [
-            IconButton(
-              tooltip: 'Activate license and select storage in Settings',
-              icon: const Icon(Icons.download, color: Colors.grey),
-              onPressed: null,
-            ),
             IconButton(
               tooltip: _hasInternet ? 'Settings' : 'Internet connection required',
               icon: Icon(Icons.settings, color: _hasInternet ? null : Colors.grey),
@@ -622,21 +644,6 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('WebBooks'),
         actions: [
-          IconButton(
-            tooltip: _canSync()
-                ? 'Download books'
-                : 'Activate license and select storage in Settings',
-            icon: Icon(
-              Icons.download,
-              color: _canSync() ? null : Colors.grey,
-            ),
-            onPressed: _canSync()
-                ? () async {
-                    await _openDownloadPanel();
-                    if (mounted) await _loadBooks();
-                  }
-                : null,
-          ),
           IconButton(
             tooltip: _hasInternet ? 'Settings' : 'Internet connection required',
             icon: Icon(Icons.settings, color: _hasInternet ? null : Colors.grey),
