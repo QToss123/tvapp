@@ -852,6 +852,31 @@ class _ReadingScreenState extends State<ReadingScreen> {
     ''';
   }
 
+  Future<void> _performBack() async {
+    try {
+      await _controller?.runJavaScript('''
+        (function(){
+          try {
+            var el = document.querySelectorAll("audio, video");
+            for (var i = 0; i < el.length; i++) {
+              el[i].pause();
+              el[i].currentTime = 0;
+              el[i].removeAttribute("src");
+              el[i].load();
+            }
+          } catch(e) {}
+        })();
+      ''');
+    } catch (_) { /* ignore */ }
+    await Future.delayed(const Duration(milliseconds: 150));
+    try {
+      await _controller?.loadRequest(Uri.parse('about:blank'));
+    } catch (_) { /* ignore */ }
+    await Future.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     // On Windows/Linux (desktop), WebView platform view draws on top of Flutter
@@ -862,44 +887,23 @@ class _ReadingScreenState extends State<ReadingScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        // Stop all HTML5 audio/video from JS first so AAudio is released before teardown (reduces crash)
-        try {
-          await _controller?.runJavaScript('''
-            (function(){
-              try {
-                var el = document.querySelectorAll("audio, video");
-                for (var i = 0; i < el.length; i++) {
-                  el[i].pause();
-                  el[i].currentTime = 0;
-                  el[i].removeAttribute("src");
-                  el[i].load();
-                }
-              } catch(e) {}
-            })();
-          ''');
-        } catch (_) { /* ignore */ }
-        await Future.delayed(const Duration(milliseconds: 150));
-        try {
-          await _controller?.loadRequest(Uri.parse('about:blank'));
-        } catch (_) { /* ignore */ }
-        await Future.delayed(const Duration(milliseconds: 600));
-        if (!context.mounted) return;
-        Navigator.of(context).pop();
+        await _performBack();
       },
       child: Scaffold(
         appBar: useAppBarForBack
             ? AppBar(
                 backgroundColor: Colors.black87,
                 elevation: 4,
+                iconTheme: const IconThemeData(color: Colors.white),
                 title: const Text(
                   'Back to BookShelf',
-                  style: TextStyle(color: Colors.white), 
+                  style: TextStyle(color: Colors.white),
                 ),
-                // leading: IconButton(
-                //   icon: const Icon(Icons.arrow_back, color: Colors.white),
-                //   tooltip: 'Back',
-                //   onPressed: () => Navigator.maybePop(context),
-                // ),
+                leading: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  tooltip: 'Back',
+                  onPressed: () => _performBack(),
+                ),
               )
             : null,
         body: Stack(
