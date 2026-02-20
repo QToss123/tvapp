@@ -26,7 +26,15 @@ class AppRoutes {
 
   static Route<dynamic>? generateRoute(RouteSettings settings) {
     if (settings.name == reading) {
-      final Book book = settings.arguments as Book;
+      final Book? book = settings.arguments is Book ? settings.arguments as Book : null;
+      if (book == null) {
+        return MaterialPageRoute(
+          builder: (context) => Scaffold(
+            appBar: AppBar(title: const Text('Error')),
+            body: const Center(child: Text('Invalid book.')),
+          ),
+        );
+      }
       return MaterialPageRoute(
         builder: (_) => ReadingScreen(book: book),
       );

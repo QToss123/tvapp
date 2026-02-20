@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/book.dart';
 import '../routes.dart';
@@ -24,9 +25,28 @@ class _BookCardState extends State<BookCard> {
   static double _px(BuildContext context, double base) =>
       _isTv(context) ? base * 1.1 : base;
 
+  void _openBook() {
+    if (!context.mounted) return;
+    Navigator.pushNamed(
+      context,
+      AppRoutes.reading,
+      arguments: widget.book,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Focus(
+      onKeyEvent: (FocusNode node, KeyEvent event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        if (event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.select ||
+            event.logicalKey == LogicalKeyboardKey.space) {
+          _openBook();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
       child: Builder(
         builder: (context) {
           final hasFocus = Focus.of(context).hasFocus;
@@ -79,15 +99,7 @@ class _BookCardState extends State<BookCard> {
                         onTapCancel: () => setState(() => _isPressed = false),
                         onTap: () {
                           setState(() => _isPressed = false);
-                          // Defer navigation so tap feedback paints and UI stays responsive (avoids ANR)
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (!context.mounted) return;
-                            Navigator.pushNamed(
-                              context,
-                              AppRoutes.reading,
-                              arguments: widget.book,
-                            );
-                          });
+                          _openBook();
                         },
                         splashColor: Colors.blueAccent.withValues(alpha: 0.3),
                         highlightColor: Colors.blueAccent.withValues(alpha: 0.15),

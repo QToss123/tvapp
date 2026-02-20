@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import '../services/book_decryption_service.dart';
@@ -94,12 +95,16 @@ Future<DecryptResult> decryptBookFileIfNeeded({
     );
   }
 
-  await BookDecryptionService.decryptFileOnDisk(
-    encryptedFilePath: encryptedFilePath,
-    bookId: encBookId,
-    keyEncB64: encKeyB64,
-    keyNonceB64: encNonceB64,
-    outputFilePath: decryptedPath,
+  // Run decryption in a background isolate so UI stays responsive (no "stuck" on TV)
+  await compute(
+    decryptOnDiskBackground,
+    DecryptOnDiskParams(
+      encryptedFilePath: encryptedFilePath,
+      bookId: encBookId!,
+      keyEncB64: encKeyB64!,
+      keyNonceB64: encNonceB64!,
+      outputFilePath: decryptedPath,
+    ),
   );
 
   // Verify decrypted file exists and log

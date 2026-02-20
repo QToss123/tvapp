@@ -6,7 +6,6 @@ import '../models/book.dart';
 import '../routes.dart';
 import '../widgets/book_card.dart';
 import '../services/database_service.dart';
-import '../services/book_preprocess_service.dart';
 import '../utils/connectivity_helper.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -300,7 +299,6 @@ class _HomeScreenState extends State<HomeScreen> {
           _isStorageConnected = true;
           _isLoadingBooks = false;
         });
-        BookPreprocessService.preprocessBooks(books);
       }
     } catch (e) {
       if (mounted) {

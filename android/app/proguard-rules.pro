@@ -37,6 +37,10 @@
 }
 -keep class android.webkit.** { *; }
 
+# AndroidX Window / Sidecar - FlutterView WindowInfoTracker (avoid ClassNotFoundException on older devices)
+-keep class androidx.window.sidecar.** { *; }
+-keep class androidx.window.layout.** { *; }
+
 # Cryptography / crypto plugins used by book decryption
 -keep class androidx.security.crypto.** { *; }
 -dontwarn javax.annotation.**

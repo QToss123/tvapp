@@ -74,7 +74,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     final tvCursor = prefs.getBool(_kTVCursorEnabled) ?? Platform.isAndroid;
     setState(() {
-      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'CLA-CL252-S71-UF4H021275';
+      _licenseController.text = prefs.getString(_kLicenseNumber) ?? 'CLA-CL251-S71-WYVPXTFSFZ';
       _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
       _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';

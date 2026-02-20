@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -497,11 +498,30 @@ class ApiService {
         }
       }
     } catch (e) {
+      // User-friendly message when internet is lost or connection fails during download
+      final String message = _isNetworkError(e)
+          ? 'Internet disconnected. Check your connection and try again.'
+          : 'Download failed. Please try again.';
       return {
         'success': false,
-        'message': 'Network error: $e',
+        'message': message,
         'filePath': null,
       };
     }
+  }
+
+  static bool _isNetworkError(Object e) {
+    if (e is SocketException) return true;
+    if (e is HttpException) return true;
+    if (e is HandshakeException) return true;
+    if (e is TimeoutException) return true;
+    if (e is IOException) return true;
+    final s = e.toString().toLowerCase();
+    return s.contains('socket') ||
+        s.contains('connection') ||
+        s.contains('network') ||
+        s.contains('timeout') ||
+        s.contains('host') ||
+        s.contains('failed host lookup');
   }
 }

@@ -37,8 +37,10 @@ class ReadingScreen extends StatefulWidget {
 class _ReadingScreenState extends State<ReadingScreen> {
   static const _kTVCursorEnabled = 'tv_cursor_enabled';
 
-  late final WebViewController _controller;
+  WebViewController? _controller;
   bool _isLoading = true;
+  /// Shown during decrypt/unzip/open (opening, unlocking, preparing, loading)
+  String? _loadingMessage;
   String? _error;
   HttpServer? _localServer;
   int _serverPort = 8080;
@@ -131,15 +133,17 @@ class _ReadingScreenState extends State<ReadingScreen> {
         return;
       }
       
-      await _controller.runJavaScript(jsCode);
+      await _controller?.runJavaScript(jsCode);
     } catch (e) { /* ignore */ }
   }
 
   /// Builds WebView for desktop (Windows/Linux). On Linux, adds keyboard scroll
   /// shortcuts because mouse scroll often doesn't work with webkit2gtk.
   Widget _buildDesktopWebView() {
+    final c = _controller;
+    if (c == null) return const SizedBox.shrink();
     if (!Platform.isLinux && !Platform.isWindows) {
-      return WebViewWidget(controller: _controller);
+      return WebViewWidget(controller: c);
     }
     const scrollAmount = 120;
     return Shortcuts(
@@ -165,7 +169,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
           autofocus: true,
           child: Listener(
             onPointerDown: (_) => _webViewFocusNode.requestFocus(),
-            child: WebViewWidget(controller: _controller),
+            child: WebViewWidget(controller: c),
           ),
         ),
       ),
@@ -183,7 +187,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
           else window.scrollBy(0, $deltaY);
         })();
       ''';
-      await _controller.runJavaScript(js);
+      await _controller?.runJavaScript(js);
     } catch (e) { /* ignore */ }
   }
 
@@ -232,7 +236,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
           });
         })();
       ''';
-      await _controller.runJavaScript(jsCode);
+      await _controller?.runJavaScript(jsCode);
     } catch (e) { /* ignore */ }
   }
 
@@ -284,7 +288,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
           console.log('TV cursor and keyboard nav enabled');
         })();
       ''';
-      await _controller.runJavaScript(jsCode);
+      await _controller?.runJavaScript(jsCode);
     } catch (e) { /* ignore */ }
   }
 
@@ -300,73 +304,91 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
 
   void _initializeWebView() {
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..enableZoom(true)
-      ..setBackgroundColor(Colors.white)
-      ..addJavaScriptChannel(
-        'FlutterChannel',
-        onMessageReceived: (JavaScriptMessage message) {
-        },
-      )
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageStarted: (String url) {
-            setState(() {
-              _isLoading = true;
-              _error = null;
-            });
+    try {
+      final c = WebViewController()
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..enableZoom(true)
+        ..setBackgroundColor(Colors.white)
+        ..addJavaScriptChannel(
+          'FlutterChannel',
+          onMessageReceived: (JavaScriptMessage message) {
           },
-          onPageFinished: (String url) {
-            _linuxHttpFallbackUrl = null;
-            setState(() {
-              _isLoading = false;
-            });
-            _injectBookFixes();
-            if (_useTvCursor) {
-              _requestWebViewFocus();
-              _enableKeyboardNavigation();
-            }
-          },
-          onWebResourceError: (WebResourceError error) {
-            if (error.isForMainFrame == true) {
-              // Linux: if file:// failed, retry with HTTP
-              final fallback = _linuxHttpFallbackUrl;
-              final errUrl = error.url;
-              if (Platform.isLinux &&
-                  fallback != null &&
-                  (errUrl == null || errUrl.isEmpty || errUrl.startsWith('file://'))) {
-                _linuxHttpFallbackUrl = null;
-                if (mounted) {
-                  _controller.loadRequest(Uri.parse(fallback));
+        )
+        ..setNavigationDelegate(
+          NavigationDelegate(
+            onPageStarted: (String url) {
+              if (mounted) setState(() {
+                _isLoading = true;
+                _error = null;
+              });
+            },
+            onPageFinished: (String url) {
+              _linuxHttpFallbackUrl = null;
+              if (mounted) setState(() { _isLoading = false; _loadingMessage = null; });
+              _injectBookFixes();
+              if (_useTvCursor) {
+                _requestWebViewFocus();
+                _enableKeyboardNavigation();
+              }
+            },
+            onWebResourceError: (WebResourceError error) {
+              if (error.isForMainFrame == true) {
+                final fallback = _linuxHttpFallbackUrl;
+                final errUrl = error.url;
+                if (Platform.isLinux &&
+                    fallback != null &&
+                    (errUrl == null || errUrl.isEmpty || errUrl.startsWith('file://'))) {
+                  _linuxHttpFallbackUrl = null;
+                  if (mounted && _controller != null) {
+                    _controller!.loadRequest(Uri.parse(fallback));
+                  }
+                  return;
                 }
-                return;
+                if (mounted) {
+                  setState(() {
+                    _isLoading = false;
+                    _error = 'This book couldn’t be opened.';
+                  });
+                }
               }
-              if (mounted) {
-                setState(() {
-                  _isLoading = false;
-                  _error = 'This file could not be opened.';
-                });
-              }
-            } else {
-            }
-          },
-        ),
-      );
+            },
+          ),
+        );
+      _controller = c;
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Couldn’t open the reader. Please try again.';
+          _isLoading = false;
+        });
+      }
+      return;
+    }
 
     // Defer load so first frame paints (loading indicator) and UI thread stays responsive (avoids ANR)
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _startLoadingContent();
+      if (!mounted || _controller == null) return;
+      try {
+        _startLoadingContent();
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _error = 'Couldn’t open this book. Please try again.';
+            _isLoading = false;
+          });
+        }
+      }
     });
   }
 
   void _startLoadingContent() {
+    final c = _controller;
+    if (c == null) return;
     if (widget.book.contentUrl == null || widget.book.contentUrl!.isEmpty) {
-      _controller.loadRequest(Uri.parse('about:blank'));
+      c.loadRequest(Uri.parse('about:blank'));
       setState(() {
         _isLoading = false;
-        _error = 'Not ready. Go to Sync to download first.';
+        _error = 'This book isn’t downloaded yet. Go to Sync to download it first.';
       });
       return;
     }
@@ -377,7 +399,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
     } else if (contentUrl.startsWith('file://')) {
       _loadFile(contentUrl);
     } else if (contentUrl.startsWith('http://') || contentUrl.startsWith('https://')) {
-      _controller.loadRequest(Uri.parse(contentUrl));
+      c.loadRequest(Uri.parse(contentUrl));
     } else {
       _loadAsset(contentUrl);
     }
@@ -457,7 +479,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
           : 'file:///android_asset/flutter_assets/';
       
       
-      await _controller.loadHtmlString(
+      await _controller?.loadHtmlString(
         modifiedHtml,
         baseUrl: baseUrl,
       );
@@ -493,11 +515,11 @@ class _ReadingScreenState extends State<ReadingScreen> {
   /// Loads a file from external storage. Uses in-screen loader only (no blocking dialog).
   /// Loader is cleared when WebView finishes loading (onPageFinished).
   Future<void> _loadFile(String fileUrl) async {
-    if (mounted) setState(() { _isLoading = true; _error = null; });
+    if (mounted) setState(() { _isLoading = true; _error = null; _loadingMessage = 'opening'; });
     await Future.delayed(Duration.zero); // Let loading indicator paint before heavy work
 
     void showErr(String message) {
-      if (mounted) setState(() { _isLoading = false; _error = message; });
+      if (mounted) setState(() { _isLoading = false; _error = message; _loadingMessage = null; });
     }
 
     try {
@@ -510,7 +532,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
       final fileExists = await file.exists();
 
       if (!fileExists) {
-        showErr('File not found.');
+        showErr('This book wasn’t found. It may have been moved or deleted.');
         return;
       }
 
@@ -519,15 +541,14 @@ class _ReadingScreenState extends State<ReadingScreen> {
       final encBookId = dbBook?.encBookId ?? widget.book.encBookId;
       final encKeyB64 = dbBook?.encKeyB64 ?? widget.book.encKeyB64;
       final encNonceB64 = dbBook?.encNonceB64 ?? widget.book.encNonceB64;
-      if (dbBook != null) {
-      } else {
-      }
 
-      // If encrypted metadata exists, decrypt via util (on book click), then unzip/open extracted location
+      // If encrypted: decrypt on click (not on bookshelf)
       final hasEncMeta = (encBookId != null && encBookId.isNotEmpty) ||
           (encKeyB64 != null && encKeyB64.isNotEmpty) ||
           (encNonceB64 != null && encNonceB64.isNotEmpty);
       if (hasEncMeta) {
+        if (mounted) setState(() { _loadingMessage = 'unlocking'; });
+        await Future.delayed(const Duration(milliseconds: 80)); // Let "Decrypting..." paint before heavy work
         await isDecryptedFileAvailable(
           encryptedFilePath: filePath,
           encBookId: encBookId ?? '',
@@ -545,11 +566,12 @@ class _ReadingScreenState extends State<ReadingScreen> {
           _decryptedCachePath = result.pathToUse;
           file = File(filePath);
         } catch (e) {
-          showErr('Incorrect format.');
+          showErr('This book couldn’t be opened. It may be damaged or in the wrong format.');
           return;
         }
       }
 
+      if (mounted) setState(() { _loadingMessage = 'preparing'; });
       await Future.delayed(const Duration(milliseconds: 50));
       ({String path, bool wasExtracted}) processed;
       try {
@@ -591,6 +613,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
       
       await Future.delayed(const Duration(milliseconds: 50));
 
+      if (mounted) setState(() { _loadingMessage = 'loading'; });
       await _startLocalServer(bookDirectory);
       final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path);
       final urlPath = relativePath.replaceAll('\\', '/');
@@ -608,9 +631,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
       if (Platform.isLinux || Platform.isWindows) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _controller.loadRequest(Uri.parse(bookUrl));
-          }
+          if (mounted) _controller?.loadRequest(Uri.parse(bookUrl));
         });
       } else {
         // Android/Android TV: WebView is often not attached until after the dialog closes and a frame runs.
@@ -620,12 +641,12 @@ class _ReadingScreenState extends State<ReadingScreen> {
           await Future.delayed(const Duration(milliseconds: 300));
           if (!mounted) return;
           try {
-            _controller.loadRequest(Uri.parse(bookUrl));
+            _controller?.loadRequest(Uri.parse(bookUrl));
           } catch (e) {
             if (mounted) {
               setState(() {
                 _isLoading = false;
-                _error = 'This file could not be opened.';
+                _error = 'This book couldn’t be opened.';
               });
             }
           }
@@ -644,8 +665,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
             errorStr.contains('wrong mac') ||
             errorStr.contains('index.html');
         final String friendlyMessage =
-            isFormatOrDecrypt ? 'Incorrect format.' : 'This file could not be opened.';
-        setState(() { _isLoading = false; _error = friendlyMessage; });
+            isFormatOrDecrypt ? 'This book couldn’t be opened. It may be damaged or in the wrong format.' : 'This book couldn’t be opened.';
+        setState(() { _isLoading = false; _error = friendlyMessage; _loadingMessage = null; });
       }
     }
   }
@@ -843,7 +864,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         if (didPop) return;
         // Stop all HTML5 audio/video from JS first so AAudio is released before teardown (reduces crash)
         try {
-          await _controller.runJavaScript('''
+          await _controller?.runJavaScript('''
             (function(){
               try {
                 var el = document.querySelectorAll("audio, video");
@@ -859,7 +880,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         } catch (_) { /* ignore */ }
         await Future.delayed(const Duration(milliseconds: 150));
         try {
-          await _controller.loadRequest(Uri.parse('about:blank'));
+          await _controller?.loadRequest(Uri.parse('about:blank'));
         } catch (_) { /* ignore */ }
         await Future.delayed(const Duration(milliseconds: 600));
         if (!context.mounted) return;
@@ -910,7 +931,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
                         if (widget.book.contentUrl != null &&
                             widget.book.contentUrl!.isNotEmpty) {
                           setState(() => _error = null);
-                          _controller.reload();
+                          _controller?.reload();
                         } else {
                           Navigator.maybePop(context);
                         }
@@ -931,7 +952,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
                   ],
                 ),
               )
-            else
+            else if (_controller != null)
               _useTvCursor
                   ? Shortcuts(
                       shortcuts: <LogicalKeySet, Intent>{
@@ -955,7 +976,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
                           focusNode: _webViewFocusNode,
                           autofocus: true,
                           skipTraversal: false,
-                          child: WebViewWidget(controller: _controller),
+                          child: WebViewWidget(controller: _controller!),
                         ),
                       ),
                     )
@@ -988,16 +1009,27 @@ class _ReadingScreenState extends State<ReadingScreen> {
                       ),
                       const SizedBox(height: 24),
                       Text(
-                        'Loading book content...',
+                        _loadingMessage == 'opening' || _loadingMessage == 'loading'
+                            ? 'Opening your book…'
+                            : _loadingMessage == 'unlocking'
+                                ? 'Getting your book ready…'
+                                : _loadingMessage == 'preparing'
+                                    ? 'Almost there…'
+                                    : 'Opening your book…',
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                           color: Colors.grey.shade800,
                           letterSpacing: 0.2,
                         ),
+                        textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Preparing your reading experience',
+                        _loadingMessage == null
+                            ? 'Getting everything ready'
+                            : _loadingMessage == 'unlocking'
+                                ? 'First time may take a little longer'
+                                : 'Please wait',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Colors.grey.shade600,
                           fontSize: 14,

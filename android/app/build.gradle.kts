@@ -79,6 +79,11 @@ tasks.withType<JavaCompile>().configureEach {
     options.compilerArgs.add("-Xlint:-options")
 }
 
+dependencies {
+    // WebView/Chromium on some devices (e.g. Android TV) looks for this at runtime when evaluateJavascript runs
+    implementation("androidx.window:window:1.3.0")
+}
+
 flutter {
     source = "../.."
 }

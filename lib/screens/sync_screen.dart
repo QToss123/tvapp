@@ -19,6 +19,8 @@ class SyncItem {
   final Map<String, dynamic> course;
   String status; // pending | downloading | done | error
   int progress;  // 0-100
+  /// When status == 'error', optional message (e.g. "Connection lost")
+  String? errorMessage;
 
   SyncItem({
     required this.courseId,
@@ -28,6 +30,7 @@ class SyncItem {
     this.thumbnail,
     this.status = 'pending',
     this.progress = 0,
+    this.errorMessage,
   });
 }
 
@@ -47,7 +50,7 @@ class SyncScreen extends StatefulWidget {
 
 class _SyncScreenState extends State<SyncScreen> {
   bool _isLoading = false;
-  String _statusMessage = 'Preparing to sync...';
+  String _statusMessage = 'Getting ready…';
   int _totalBooks = 0;
   int _downloadedBooks = 0;
   bool _syncComplete = false;
@@ -92,7 +95,7 @@ class _SyncScreenState extends State<SyncScreen> {
   Future<void> _startSync() async {
     setState(() {
       _isLoading = true;
-      _statusMessage = 'Starting sync process...';
+      _statusMessage = 'Starting…';
     });
     await _fetchAndPrepare();
   }
@@ -131,7 +134,7 @@ class _SyncScreenState extends State<SyncScreen> {
     setState(() {
       _isLoading = false;
       _downloadedBooks = done;
-      _statusMessage = 'Sync complete! Downloaded $done/${_syncItems.length} books.';
+      _statusMessage = 'Done! $done of ${_syncItems.length} books downloaded.';
       _syncComplete = true;
     });
   }
@@ -146,7 +149,7 @@ class _SyncScreenState extends State<SyncScreen> {
         if (!mounted) return;
         setState(() {
           _isLoading = false;
-          _statusMessage = 'Storage location not configured. Please select a storage location in Settings.';
+          _statusMessage = 'Choose where to save books in Settings first.';
         });
         return;
       }
@@ -154,7 +157,7 @@ class _SyncScreenState extends State<SyncScreen> {
       // Check internet connectivity before starting online sync
       if (!mounted) return;
       setState(() {
-        _statusMessage = 'Checking internet connection...';
+        _statusMessage = 'Checking your internet…';
       });
       
       final hasInternet = await ConnectivityHelper.hasInternetConnection();
@@ -162,14 +165,14 @@ class _SyncScreenState extends State<SyncScreen> {
         if (!mounted) return;
         setState(() {
           _isLoading = false;
-          _statusMessage = 'Internet connection required for online sync. Please check your network connection and try again.';
+          _statusMessage = 'You need an internet connection to sync. Please check your Wi‑Fi or network and try again.';
         });
         return;
       }
 
       if (!mounted) return;
       setState(() {
-        _statusMessage = 'Fetching books from server...';
+        _statusMessage = 'Loading your book list…';
       });
 
       // Fetch product list from API
@@ -179,7 +182,7 @@ class _SyncScreenState extends State<SyncScreen> {
         if (!mounted) return;
         setState(() {
           _isLoading = false;
-          _statusMessage = 'Failed to fetch books: ${result['message']}';
+          _statusMessage = 'Couldn’t load the book list. Please try again.';
         });
         return;
       }
@@ -225,7 +228,7 @@ class _SyncScreenState extends State<SyncScreen> {
         if (!mounted) return;
         setState(() {
           _isLoading = false;
-          _statusMessage = 'No books found on server.';
+          _statusMessage = 'No books available to download.';
           _syncComplete = true;
         });
         return;
@@ -234,7 +237,7 @@ class _SyncScreenState extends State<SyncScreen> {
       // Save all courses to database first
       if (!mounted) return;
       setState(() {
-        _statusMessage = 'Saving $_totalBooks book(s) to database...';
+        _statusMessage = 'Saving your book list…';
       });
 
       for (final course in allCourses) {
@@ -282,7 +285,7 @@ class _SyncScreenState extends State<SyncScreen> {
       _allCoursesForSync = List<Map<String, dynamic>>.from(allCourses);
       if (!mounted) return;
       setState(() {
-        _statusMessage = 'Downloading $_totalBooks book(s)...';
+        _statusMessage = 'Downloading $_totalBooks book(s)…';
         _downloadedBooks = 0;
         _syncItems = items;
         _fetchDone = true;
@@ -295,7 +298,7 @@ class _SyncScreenState extends State<SyncScreen> {
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _statusMessage = 'Error during sync: $e';
+          _statusMessage = 'Something went wrong. Please try again.';
         });
       }
     }
@@ -328,17 +331,25 @@ class _SyncScreenState extends State<SyncScreen> {
     final productName = item.productName;
     final course = item.course;
 
-    void update({String? status, int? progress}) {
+    void update({String? status, int? progress, String? errorMessage}) {
       if (!mounted) return;
       setState(() {
         if (status != null) item.status = status;
         if (progress != null) item.progress = progress;
+        if (errorMessage != null) item.errorMessage = errorMessage;
         _updateStatusFromItems();
       });
     }
 
+    // Check connectivity before starting (and when retrying) so we fail fast with a clear message
+    final hasInternet = await ConnectivityHelper.hasInternetConnection();
+    if (!hasInternet) {
+      update(status: 'error', errorMessage: 'No internet. Tap Retry when you’re back online.');
+      return;
+    }
+
     try {
-      update(status: 'downloading', progress: 0);
+      update(status: 'downloading', progress: 0, errorMessage: null);
 
       final downloadResult = await ApiService.downloadCourse(
         courseId,
@@ -348,7 +359,18 @@ class _SyncScreenState extends State<SyncScreen> {
       );
 
       if (downloadResult['success'] != true) {
-        update(status: 'error');
+        final msg = downloadResult['message'] is String
+            ? downloadResult['message'] as String
+            : 'Download didn’t complete. Tap Retry to try again.';
+        update(status: 'error', errorMessage: msg);
+        if (mounted && msg.toLowerCase().contains('connection')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Internet disconnected. Tap Retry on any failed book to try again.'),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
         return;
       }
 
@@ -391,8 +413,30 @@ class _SyncScreenState extends State<SyncScreen> {
       await DatabaseService.insertBook(book, courseId: courseId, filePath: finalPath);
       update(status: 'done', progress: 100);
     } catch (e) {
-      update(status: 'error');
+      final msg = _isNetworkError(e)
+          ? 'Internet disconnected. Tap Retry when you’re back online.'
+          : 'Download didn’t complete. Tap Retry to try again.';
+      update(status: 'error', errorMessage: msg);
+      if (mounted && _isNetworkError(e)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Internet disconnected. Tap Retry on any failed book to try again.'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
     }
+  }
+
+  static bool _isNetworkError(Object e) {
+    final s = e.toString().toLowerCase();
+    return s.contains('socket') ||
+        s.contains('connection') ||
+        s.contains('network') ||
+        s.contains('timeout') ||
+        s.contains('host') ||
+        s.contains('failed host lookup') ||
+        s.contains('handshake');
   }
 
   void _handleBack() {
@@ -401,7 +445,7 @@ class _SyncScreenState extends State<SyncScreen> {
     if (downloading && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Downloads will continue in background.'),
+          content: Text('Downloads will continue in the background.'),
           duration: Duration(seconds: 3),
         ),
       );
@@ -617,7 +661,7 @@ class _SyncScreenState extends State<SyncScreen> {
             _syncItems.any((s) => s.status == 'downloading' || s.status == 'pending')) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Downloads will continue in background.'),
+              content: Text('Downloads will continue in the background.'),
               duration: Duration(seconds: 3),
             ),
           );
@@ -786,13 +830,14 @@ class _SyncItemGridTile extends StatelessWidget {
                                   isDone
                                       ? 'Done'
                                       : isError
-                                          ? 'Error'
+                                          ? (item.errorMessage ?? 'Error')
                                           : '${item.progress}%',
                                   style: TextStyle(
                                     fontSize: _fs(context, 10),
                                     fontWeight: FontWeight.w600,
                                     color: statusColor,
                                   ),
+                                  maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
