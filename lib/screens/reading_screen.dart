@@ -547,18 +547,18 @@ class _ReadingScreenState extends State<ReadingScreen> {
     }
 
     try {
-      await _loadTvCursorSetting();
-
       var filePath = _fileUrlToPath(fileUrl);
       var file = File(filePath);
 
-      // Run file check and DB lookup in parallel for faster open
+      // Run file check, DB lookup, and TV cursor in parallel for faster open (MSI/release)
       final results = await Future.wait([
         file.exists(),
         DatabaseService.getBookByFilePath(filePath),
+        _loadTvCursorSetting(),
       ]);
       final fileExists = results[0] as bool;
       final dbBook = results[1] as Book?;
+      // results[2] is _loadTvCursorSetting (no return value needed)
 
       if (!fileExists) {
         showErr('This book wasn’t found. It may have been moved or deleted.');
