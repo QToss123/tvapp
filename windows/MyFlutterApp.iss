@@ -1,18 +1,18 @@
 [Setup]
-AppName=BurlingtonEnglish
+AppName=Burlington
 AppVersion=1.0.0
-DefaultDirName={pf}\BurlingtonEnglish
-DefaultGroupName=BurlingtonEnglish
-OutputBaseFilename=BurlingtonEnglishSetup
+DefaultDirName={pf}\Burlington
+DefaultGroupName=Burlington
+OutputBaseFilename=BurlingtonSetup
 Compression=lzma
 SolidCompression=yes
 
 [Files]
-Source: "build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: recursesubdirs
+Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: recursesubdirs
 
 [Icons]
-Name: "{group}\BurlingtonEnglish"; Filename: "{app}\tv_app_books.exe"
-Name: "{commondesktop}\BurlingtonEnglish"; Filename: "{app}\tv_app_books.exe"
+Name: "{group}\Burlington"; Filename: "{app}\tv_app_books.exe"; WorkingDir: "{app}"
+Name: "{commondesktop}\Burlington"; Filename: "{app}\tv_app_books.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\tv_app_books.exe"; Description: "Launch BurlingtonEnglish"; Flags: nowait postinstall
+Filename: "{app}\tv_app_books.exe"; Description: "Launch Burlington"; Flags: nowait postinstall

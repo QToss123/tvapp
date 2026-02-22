@@ -1,5 +1,71 @@
 # MSI / Windows installer notes
 
+## Advanced Installer: app stuck on "Opening book" screen
+
+If the app works when you run the **EXE directly** from the build folder but **stops responding** after opening a book when installed via **Advanced Installer** (or another MSI), the shortcut is likely starting the app with the wrong **working directory**.
+
+### Fix: Set the shortcut "Start in" (working directory)
+
+1. In **Advanced Installer**, open your project.
+2. Go to **Shortcuts** (or **Installation** → **Shortcuts**).
+3. Open the shortcut that launches **tv_app_books.exe** (e.g. Desktop or Start Menu).
+4. Set **"Start in"** / **Working directory** to the **application install folder**, for example:
+   - `[INSTALLDIR]`  
+   - or `[ProgramFilesFolder]BurlingtonEnglish`  
+   (Use the same folder where **tv_app_books.exe** is installed.)
+5. Rebuild the MSI and reinstall.
+
+The app and its DLLs must run with that folder as the current directory. If "Start in" is empty or wrong, the process can fail to load correctly or hang when opening a book.
+
+### Also check
+
+- **Install for**: "All users" or "Current user" is fine, but the shortcut must **Run as user** (not elevated).
+- **Target**: Should be `[INSTALLDIR]tv_app_books.exe` (or your exe name).
+
+---
+
+## Creating installers from the command line
+
+### Option 1: Inno Setup (EXE installer) – already in this project
+
+Produces an **.exe** installer (not .msi). Shortcuts get the correct "Start in" so the app works.
+
+1. **Build the Windows release first:**
+   ```powershell
+   cd c:\Users\meena\Desktop\git\tv_app_books
+   flutter build windows --release
+   ```
+
+2. **Install Inno Setup** (if not installed):
+   ```powershell
+   winget install -e --id JRSoftware.InnoSetup
+   ```
+
+3. **Build the installer** (either way):
+
+   **A) Using inno_bundle (Flutter):**
+   ```powershell
+   dart run inno_bundle
+   ```
+   Output is usually in `build\windows\x64\runner\` or project root (see console).
+
+   **B) Using Inno Setup compiler directly:**
+   ```powershell
+   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" windows\MyFlutterApp.iss
+   ```
+   Output: `windows\Output\BurlingtonEnglishSetup.exe` (or path shown in the script).
+
+### Option 2: Real MSI from the command line
+
+- **WiX Toolset** (free): Install WiX, author a .wxs file, then build with `candle` and `light` (or MSBuild). Produces a real .msi.
+- **Advanced Installer CLI**: If you use Advanced Installer, you can build from command line, e.g.:
+  ```powershell
+  "C:\Program Files (x86)\Caphyon\Advanced Installer\bin\x86\AdvancedInstaller.com" /build "path\to\your.aip"
+  ```
+  (Path depends on your Advanced Installer install.)
+
+---
+
 ## Faster book opening
 
 Book opening can feel slow when using the MSI-installed app. Here are the main causes and what to do:

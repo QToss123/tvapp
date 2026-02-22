@@ -533,12 +533,12 @@ class _ReadingScreenState extends State<ReadingScreen> {
     if (mounted) setState(() { _isLoading = true; _error = null; _loadingMessage = 'opening'; });
     await Future.delayed(Duration.zero); // Let loading indicator paint once
 
-    // Show reader frame immediately on Android so user sees "Opening..." (skip on Windows/Linux to avoid blocking load)
-    if (mounted && _controller != null && !Platform.isWindows && !Platform.isLinux) {
+    // Show "Opening book..." in WebView immediately so user sees it instead of black (desktop WebView draws on top of Flutter overlay)
+    if (mounted && _controller != null) {
       _controller!.loadHtmlString(
         '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
-        '<body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui,sans-serif;color:#555;">'
-        '<p style="font-size:1.1em;">Opening book…</p></body></html>',
+        '<body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui,sans-serif;color:#555;background:#fff;">'
+        '<p style="font-size:1.1em;">Opening book...</p></body></html>',
       );
     }
 
