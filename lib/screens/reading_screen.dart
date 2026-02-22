@@ -336,7 +336,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
               if (error.isForMainFrame == true) {
                 final fallback = _linuxHttpFallbackUrl;
                 final errUrl = error.url;
-                if (Platform.isLinux &&
+                if ((Platform.isLinux || Platform.isWindows) &&
                     fallback != null &&
                     (errUrl == null || errUrl.isEmpty || errUrl.startsWith('file://'))) {
                   _linuxHttpFallbackUrl = null;
@@ -531,7 +531,16 @@ class _ReadingScreenState extends State<ReadingScreen> {
   /// Loader is cleared when WebView finishes loading (onPageFinished).
   Future<void> _loadFile(String fileUrl) async {
     if (mounted) setState(() { _isLoading = true; _error = null; _loadingMessage = 'opening'; });
-    await Future.delayed(Duration.zero); // Let loading indicator paint before heavy work
+    await Future.delayed(Duration.zero); // Let loading indicator paint once
+
+    // Show reader frame immediately on Android so user sees "Opening..." (skip on Windows/Linux to avoid blocking load)
+    if (mounted && _controller != null && !Platform.isWindows && !Platform.isLinux) {
+      _controller!.loadHtmlString(
+        '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+        '<body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui,sans-serif;color:#555;">'
+        '<p style="font-size:1.1em;">Opening book…</p></body></html>',
+      );
+    }
 
     void showErr(String message) {
       if (mounted) setState(() { _isLoading = false; _error = message; _loadingMessage = null; });
@@ -543,16 +552,18 @@ class _ReadingScreenState extends State<ReadingScreen> {
       var filePath = _fileUrlToPath(fileUrl);
       var file = File(filePath);
 
-      await Future.delayed(const Duration(milliseconds: 50));
-      final fileExists = await file.exists();
+      // Run file check and DB lookup in parallel for faster open
+      final results = await Future.wait([
+        file.exists(),
+        DatabaseService.getBookByFilePath(filePath),
+      ]);
+      final fileExists = results[0] as bool;
+      final dbBook = results[1] as Book?;
 
       if (!fileExists) {
         showErr('This book wasn’t found. It may have been moved or deleted.');
         return;
       }
-
-      // Always load encryption keys from local DB (book-wise) if available
-      final dbBook = await DatabaseService.getBookByFilePath(filePath);
       final encBookId = dbBook?.encBookId ?? widget.book.encBookId;
       final encKeyB64 = dbBook?.encKeyB64 ?? widget.book.encKeyB64;
       final encNonceB64 = dbBook?.encNonceB64 ?? widget.book.encNonceB64;
@@ -563,13 +574,12 @@ class _ReadingScreenState extends State<ReadingScreen> {
           (encNonceB64 != null && encNonceB64.isNotEmpty);
       if (hasEncMeta) {
         if (mounted) setState(() { _loadingMessage = 'unlocking'; });
-        await Future.delayed(const Duration(milliseconds: 80)); // Let "Decrypting..." paint before heavy work
+        await Future.delayed(Duration.zero);
         await isDecryptedFileAvailable(
           encryptedFilePath: filePath,
           encBookId: encBookId ?? '',
         );
 
-        await Future.delayed(const Duration(milliseconds: 50));
         try {
           final result = await decryptBookFileIfNeeded(
             encryptedFilePath: filePath,
@@ -587,7 +597,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       }
 
       if (mounted) setState(() { _loadingMessage = 'preparing'; });
-      await Future.delayed(const Duration(milliseconds: 50));
       ({String path, bool wasExtracted}) processed;
       try {
         processed = await ZipHandler.processBookFileOffMain(filePath);
@@ -625,8 +634,6 @@ class _ReadingScreenState extends State<ReadingScreen> {
       } else {
         throw Exception('Path is neither a file nor a directory: $filePath');
       }
-      
-      await Future.delayed(const Duration(milliseconds: 50));
 
       if (mounted) setState(() { _loadingMessage = 'loading'; });
       await _startLocalServer(bookDirectory);
@@ -635,8 +642,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
       final httpUrl = 'http://127.0.0.1:$_serverPort/$urlPath';
 
       String bookUrl;
-      if (Platform.isLinux) {
-        // Linux: try file:// first (Uri.file for proper encoding). Fallback to HTTP if it fails.
+      if (Platform.isLinux || Platform.isWindows) {
+        // Desktop: try file:// first so WebView doesn't hit localhost restrictions. Fallback to HTTP if it fails.
         bookUrl = Uri.file(indexHtmlPath).toString();
         _linuxHttpFallbackUrl = httpUrl;
       } else {
@@ -645,8 +652,10 @@ class _ReadingScreenState extends State<ReadingScreen> {
       }
 
       if (Platform.isLinux || Platform.isWindows) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _controller?.loadRequest(Uri.parse(bookUrl));
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!mounted) return;
+          _controller?.loadRequest(Uri.parse(bookUrl));
+          // If file:// fails, onWebResourceError will retry with HTTP fallback
         });
       } else {
         // Android/Android TV: WebView is often not attached until after the dialog closes and a frame runs.
