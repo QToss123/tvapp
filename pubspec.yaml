@@ -1,0 +1,74 @@
+name: tv_app_books
+description: "BurlingtonEnglish - Bookshelf App (Android + Windows + Linux)"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  # Dart 3.5+ for Docker/CI (Flutter 3.24.x); 3.10+ preferred when available
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  shared_preferences: ^2.2.3
+  webview_flutter: ^4.4.2
+  webview_win_floating: ^3.0.2
+  path_provider: ^2.1.1
+  file_picker: ^8.1.2
+  archive: ^3.4.0
+  path: ^1.9.0
+  http: ^1.1.0
+  device_info_plus: ^9.1.0
+  sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.3.3
+  permission_handler: ^11.0.0
+  cryptography: ^2.9.0
+  cryptography_flutter: ^2.3.4
+  workmanager: ^0.9.0
+  cached_network_image: ^3.3.1
+  flutter_cache_manager: ^3.3.1
+  uuid: ^4.2.1
+  url_launcher: ^6.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  # 5.x for Dart 3.5 (Docker/CI); 6.x requires Dart ^3.8
+  flutter_lints: ^5.0.0
+  inno_bundle: ^0.11.2
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/app_icon.png
+  min_sdk_android: 21
+  web:
+    generate: true
+    image_path: assets/app_icon.png
+    background_color: "#000000"
+    theme_color: "#000000"
+  windows:
+    generate: true
+    image_path: assets/app_icon.png
+    icon_size: 256
+  linux:
+    generate: true
+    image_path: assets/app_icon.png
+
+inno_bundle:
+  id: "7f3e2a1b-8c9d-4e5f-a6b7-1c2d3e4f5a6b"
+  name: "BurlingtonEnglish"
+  description: "BurlingtonEnglish - Bookshelf App (Android + Windows + Linux)"
+  installer_icon: "windows/runner/resources/app_icon.ico"
+  admin: false
+  arch: "x64_compatible"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/app_icon.png
+

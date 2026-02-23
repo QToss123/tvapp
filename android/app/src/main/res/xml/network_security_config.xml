@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Allow HTTP to localhost so the in-app reader can load books from the local HTTP server (127.0.0.1). Required in both debug and release on Android TV. Some devices block cleartext in release unless base-config permits it. -->
+<network-security-config>
+    <!-- Permit cleartext so WebView can load http://127.0.0.1 in release APK (book reader). Restricts to localhost-only via domain-config below where supported. -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">::1</domain>
+    </domain-config>
+</network-security-config>

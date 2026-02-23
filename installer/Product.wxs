@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="BurlingtonEnglish"
+           Manufacturer="BurlingtonEnglish"
+           Version="1.0.0.0"
+           UpgradeCode="7f3e2a1b-8c9d-4e5f-a6b7-1c2d3e4f5a6b">
+    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+    <Media Id="1" Cabinet="media1.cab" EmbedCab="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="BurlingtonEnglish" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="BurlingtonEnglish" />
+      </Directory>
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+
+    <Feature Id="ProductFeature" Title="BurlingtonEnglish" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="!(bindpath.Release)\**" />
+    </ComponentGroup>
+
+    <Component Id="ApplicationShortcut" Directory="ApplicationProgramsFolder">
+      <Shortcut Id="StartMenuShortcut"
+                Name="BurlingtonEnglish"
+                Description="BurlingtonEnglish - Bookshelf App"
+                Target="[INSTALLFOLDER]tv_app_books.exe"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveApplicationProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\BurlingtonEnglish" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="DesktopShortcut" Directory="DesktopFolder">
+      <Shortcut Id="DesktopShortcut"
+                Name="BurlingtonEnglish"
+                Description="BurlingtonEnglish - Bookshelf App"
+                Target="[INSTALLFOLDER]tv_app_books.exe"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RegistryValue Root="HKCU" Key="Software\BurlingtonEnglish" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+  </Package>
+</Wix>

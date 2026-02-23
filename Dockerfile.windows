@@ -1,0 +1,52 @@
+# Windows container to download Flutter dependencies and build Windows release.
+# Requires: Docker with Windows containers (not Linux containers).
+# Build: docker build -f Dockerfile.windows -t tv-app-books-windows .
+# Run (build and copy out): docker run --rm -v C:\path\to\project:C:\app -v C:\path\to\output:C:\out tv-app-books-windows
+
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+SHELL ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command"]
+
+# Visual Studio Build Tools (required for Flutter Windows desktop)
+ARG CHANNEL_URL=https://aka.ms/vs/17/release/channel
+ADD ${CHANNEL_URL} "C:\\TEMP\\VisualStudio.chman"
+ADD https://aka.ms/vs/17/release/vs_buildtools.exe "C:\\TEMP\\vs_buildtools.exe"
+RUN C:\\TEMP\\vs_buildtools.exe --quiet --wait --norestart --nocache \
+    --channelUri C:\\TEMP\\VisualStudio.chman \
+    --installChannelUri C:\\TEMP\\VisualStudio.chman \
+    --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended \
+    --installPath C:\\BuildTools
+
+# Git (needed by Flutter)
+RUN Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.47.0.windows.1/Git-2.47.0-64-bit.exe' -OutFile C:\\TEMP\\git.exe -UseBasicParsing; \
+    Start-Process -FilePath 'C:\\TEMP\\git.exe' -ArgumentList '/VERYSILENT /NORESTART' -Wait; \
+    Remove-Item C:\\TEMP\\git.exe -Force
+
+# Flutter SDK (stable Windows zip). Override: docker build --build-arg FLUTTER_ZIP_URL=...
+ARG FLUTTER_ZIP_URL=https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.24.5-stable.zip
+ENV FLUTTER_ZIP_URL=${FLUTTER_ZIP_URL}
+RUN Invoke-WebRequest -Uri $env:FLUTTER_ZIP_URL -OutFile C:\\TEMP\\flutter.zip -UseBasicParsing; \
+    Expand-Archive -Path C:\\TEMP\\flutter.zip -DestinationPath C:\\; \
+    Remove-Item C:\\TEMP\\flutter.zip -Force
+ENV PATH="C:\\flutter\\bin;${PATH}"
+
+# Accept Android licenses and run doctor (Windows desktop only)
+RUN flutter config --no-analytics; \
+    flutter doctor
+
+# Cleanup installers
+RUN Remove-Item -LiteralPath C:\\TEMP -Recurse -Force -ErrorAction SilentlyContinue
+
+# App lives here at build time (copied from context)
+WORKDIR C:\\app
+
+# Copy project (use .dockerignore to exclude build/ and .dart_tool/)
+COPY . .
+
+# Download dependencies and build Windows release
+RUN flutter pub get; \
+    flutter build windows --release
+
+# Default: run a script that leaves artifacts in C:\app\build\windows\x64\runner\Release
+# When using -v C:\out:C:\out, you can copy from container to host.
+CMD ["powershell", "-Command", "Write-Host 'Build complete. Release output: C:\\app\\build\\windows\\x64\\runner\\Release'; Get-ChildItem 'C:\\app\\build\\windows\\x64\\runner\\Release'"]
