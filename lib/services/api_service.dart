@@ -11,7 +11,11 @@ import 'package:tv_app_books/utils/device_id_helper.dart';
 
 /// API Service for handling license validation and other API calls
 class ApiService {
+
   static const String baseUrl = 'https://burlington-celp.adurox.com/api/v1';
+
+  
+  //static const String baseUrl = 'https://licenses.dbk.dev.burlingtonenglish.in/api/v1';
   static const String validateLicenseEndpoint = '$baseUrl/license/validate';
   static const String activateLicenseEndpoint = '$baseUrl/license/activate';
   static const String productListEndpoint = '$baseUrl/product/list';
@@ -43,16 +47,25 @@ class ApiService {
   static Future<Map<String, dynamic>> validateLicense(String licenseValue) async {
     try {
       final deviceId = await getDeviceId();
+      final requestBody = {
+        'license_value': licenseValue,
+        'device_id': deviceId,
+      };
 
       final response = await http.post(
         Uri.parse(validateLicenseEndpoint),
         headers: {
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({
-          'license_value': licenseValue,
-          'device_id': deviceId,
-        }),
+        body: jsonEncode(requestBody),
+      );
+
+      await _logApiCall(
+        method: 'POST',
+        url: validateLicenseEndpoint,
+        requestBody: requestBody,
+        statusCode: response.statusCode,
+        responseBody: response.body,
       );
 
       if (response.statusCode == 200) {
@@ -105,6 +118,12 @@ class ApiService {
         }
       }
     } catch (e) {
+      await _logApiCall(
+        method: 'POST',
+        url: validateLicenseEndpoint,
+        requestBody: {'license_value': licenseValue},
+        error: e,
+      );
       return {
         'success': false,
         'valid': false,
@@ -121,6 +140,10 @@ class ApiService {
   ) async {
     try {
       final deviceId = await getDeviceId();
+      final requestBody = {
+        'license_value': licenseValue,
+        'device_id': deviceId,
+      };
 
       final response = await http.put(
         Uri.parse(activateLicenseEndpoint),
@@ -128,10 +151,15 @@ class ApiService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'license_value': licenseValue,
-          'device_id': deviceId,
-        }),
+        body: jsonEncode(requestBody),
+      );
+
+      await _logApiCall(
+        method: 'PUT',
+        url: activateLicenseEndpoint,
+        requestBody: requestBody,
+        statusCode: response.statusCode,
+        responseBody: response.body,
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -160,6 +188,12 @@ class ApiService {
         }
       }
     } catch (e) {
+      await _logApiCall(
+        method: 'PUT',
+        url: activateLicenseEndpoint,
+        requestBody: {'license_value': licenseValue},
+        error: e,
+      );
       return {
         'success': false,
         'activated': false,
@@ -211,13 +245,6 @@ class ApiService {
         };
       }
 
-      final deviceId = await getDeviceId();
-
-      final requestBody = {
-        'license_value': licenseValue,
-        'device_id': deviceId,
-      };
-
       // Use GET request with body as shown in the curl command
       final request = http.Request(
         'GET',
@@ -229,10 +256,15 @@ class ApiService {
         'Authorization': 'Bearer $token',
       });
 
-      request.body = jsonEncode(requestBody);
-
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+
+      await _logApiCall(
+        method: 'GET',
+        url: productListEndpoint,
+        statusCode: response.statusCode,
+        responseBody: response.body,
+      );
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
@@ -293,6 +325,11 @@ class ApiService {
         }
       }
     } catch (e) {
+      await _logApiCall(
+        method: 'GET',
+        url: productListEndpoint,
+        error: e,
+      );
       return {
         'success': false,
         'message': 'Network error: $e',
@@ -334,14 +371,7 @@ class ApiService {
         };
       }
 
-      final deviceId = await getDeviceId();
-
-      final requestBody = {
-        'license_value': licenseValue,
-        'device_id': deviceId,
-      };
-
-      // Use GET request with body
+      // Use GET request without body; only Authorization header
       final request = http.Request(
         'GET',
         Uri.parse(courseDownloadEndpoint(courseId)),
@@ -352,9 +382,14 @@ class ApiService {
         'Authorization': 'Bearer $token',
       });
 
-      request.body = jsonEncode(requestBody);
-
       final response = await http.Response.fromStream(await request.send());
+
+      await _logApiCall(
+        method: 'GET',
+        url: courseDownloadEndpoint(courseId),
+        statusCode: response.statusCode,
+        responseBody: response.body,
+      );
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body) as Map<String, dynamic>;
@@ -498,6 +533,11 @@ class ApiService {
         }
       }
     } catch (e) {
+      await _logApiCall(
+        method: 'GET',
+        url: courseDownloadEndpoint(courseId),
+        error: e,
+      );
       // User-friendly message when internet is lost or connection fails during download
       final String message = _isNetworkError(e)
           ? 'Internet disconnected. Check your connection and try again.'
@@ -523,5 +563,19 @@ class ApiService {
         s.contains('timeout') ||
         s.contains('host') ||
         s.contains('failed host lookup');
+  }
+
+  /// Append API call details to a log file (log.txt) next to the running executable.
+  /// NOTE: Disabled for final Windows build.
+  static Future<void> _logApiCall({
+    required String method,
+    required String url,
+    Map<String, dynamic>? requestBody,
+    int? statusCode,
+    String? responseBody,
+    Object? error,
+  }) async {
+    // Logging is disabled in the final Windows build.
+    return;
   }
 }
