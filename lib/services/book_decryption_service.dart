@@ -250,6 +250,7 @@ class BookDecryptionService {
   static Future<Uint8List> _decryptFileContent({
     required Uint8List encryptedData,
     required Uint8List contentKey,
+    List<int> aad = const [],
   }) async {
     try {
       if (encryptedData.length < _nonceLength + _macLength) {
@@ -265,12 +266,130 @@ class BookDecryptionService {
       final decrypted = await _aesGcm.decrypt(
         secretBox,
         secretKey: secretKey,
-        aad: [],
+        aad: aad,
       );
       return Uint8List.fromList(decrypted);
     } catch (e) {
+      _logDecrypt(
+        'decryptFileContent failed',
+        dataLength: encryptedData.length,
+        error: e,
+      );
       if (e is Exception) rethrow;
       throw Exception('File decryption failed: $e');
     }
+  }
+
+  /// Appends a line to decrypt_log.txt next to the running executable (for debugging MAC/decrypt errors).
+  static void _logDecrypt(
+    String message, {
+    String? requestedPath,
+    int? dataLength,
+    Object? error,
+  }) {
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent;
+      final logFile = File(path.join(exeDir.path, 'decrypt_log.txt'));
+      final timestamp = DateTime.now().toIso8601String();
+      final buffer = StringBuffer()
+        ..writeln('---')
+        ..writeln('$timestamp')
+        ..writeln(message);
+      if (requestedPath != null) buffer.writeln('path: $requestedPath');
+      if (dataLength != null) buffer.writeln('size: $dataLength bytes');
+      if (error != null) buffer.writeln('error: $error');
+      buffer.writeln();
+      logFile.writeAsStringSync(buffer.toString(), mode: FileMode.append);
+    } catch (_) {}
+  }
+
+  /// Max size for a single chapter/asset when decrypting on demand (avoid OOM).
+  static const int maxPerFileDecryptBytes = 10 * 1024 * 1024; // 10 MB
+
+  /// Returns the content key for a book (cache this for the reading session).
+  static Future<Uint8List> getContentKey({
+    required String bookId,
+    required String keyEncB64,
+    required String keyNonceB64,
+  }) async {
+    return _decryptContentKey(
+      keyEncB64: keyEncB64,
+      keyNonceB64: keyNonceB64,
+      bookId: bookId,
+    );
+  }
+
+  /// Decrypts a single file's bytes (e.g. chapter or asset). Use with [getContentKey].
+  /// [aad] optional additional authenticated data (e.g. file path as UTF-8). Try empty then path if MAC fails.
+  /// Throws if [encryptedBytes] exceed [maxPerFileDecryptBytes].
+  static Future<Uint8List> decryptFileBytes({
+    required Uint8List encryptedBytes,
+    required Uint8List contentKey,
+    String? requestedPath,
+    List<int>? aad,
+  }) async {
+    if (encryptedBytes.length > maxPerFileDecryptBytes) {
+      throw Exception(
+        'File too large to decrypt (${(encryptedBytes.length / (1024 * 1024)).toStringAsFixed(1)} MB). Max: ${maxPerFileDecryptBytes ~/ (1024 * 1024)} MB.',
+      );
+    }
+    final aadList = aad ?? [];
+    try {
+      return await _decryptFileContent(
+        encryptedData: encryptedBytes,
+        contentKey: contentKey,
+        aad: aadList,
+      );
+    } catch (e) {
+      _logDecrypt(
+        'decryptFileBytes failed',
+        requestedPath: requestedPath,
+        dataLength: encryptedBytes.length,
+        error: e,
+      );
+      rethrow;
+    }
+  }
+
+  /// Call from reading screen / HTTP server when decrypt fails; logs path and error to decrypt_log.txt.
+  static void logDecryptFailure({
+    required String requestedPath,
+    required int fileSizeBytes,
+    required Object error,
+  }) {
+    _logDecrypt(
+      'serve decrypt failed',
+      requestedPath: requestedPath,
+      dataLength: fileSizeBytes,
+      error: error,
+    );
+  }
+
+  /// Tries decrypt with empty AAD first, then with [requestedPath] as AAD (UTF-8). Use for per-file AAD schemes.
+  static Future<Uint8List> decryptFileBytesWithOptionalAad({
+    required Uint8List encryptedBytes,
+    required Uint8List contentKey,
+    required String requestedPath,
+  }) async {
+    try {
+      return await decryptFileBytes(
+        encryptedBytes: encryptedBytes,
+        contentKey: contentKey,
+        requestedPath: requestedPath,
+        aad: [],
+      );
+    } catch (_) {
+      return await decryptFileBytes(
+        encryptedBytes: encryptedBytes,
+        contentKey: contentKey,
+        requestedPath: requestedPath,
+        aad: utf8.encode(requestedPath),
+      );
+    }
+  }
+
+  /// Logs decryption success to decrypt_log.txt (for pre-load check).
+  static void logDecryptSuccess({String? path, int? size}) {
+    _logDecrypt('decrypt OK', requestedPath: path, dataLength: size);
   }
 }

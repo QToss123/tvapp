@@ -1,5 +1,7 @@
-import 'dart:io';
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +10,7 @@ import 'package:path/path.dart' as path;
 import '../models/book.dart';
 import '../utils/zip_handler.dart';
 import '../services/database_service.dart';
+import '../services/book_decryption_service.dart';
 import '../utils/decrypt_util.dart';
 
 /// Intent for TV remote key directions
@@ -49,6 +52,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
   /// Linux fallback: HTTP URL to retry if file:// fails
   String? _linuxHttpFallbackUrl;
   String? _decryptedCachePath;
+  /// Extracted dir to delete on dispose when using unzip-first + decrypt-on-serve (memory optimization).
+  String? _extractedDirPathForCleanup;
   /// When true: TV cursor + D-pad key forwarding (Android TV). When false: plain WebView, no cursor (e.g. Windows).
   bool _useTvCursor = false;
 
@@ -95,13 +100,17 @@ class _ReadingScreenState extends State<ReadingScreen> {
         } catch (_) { /* ignore */ }
       });
     }
-    // Delete decrypted file from app cache (best-effort)
+    // Remove decrypted data to manage memory: delete decrypted zip (fallback path) and extracted dir (unzip-first path)
     if (_decryptedCachePath != null) {
       try {
         final f = File(_decryptedCachePath!);
-        if (f.existsSync()) {
-          f.deleteSync();
-        }
+        if (f.existsSync()) f.deleteSync();
+      } catch (e) { /* ignore */ }
+    }
+    if (_extractedDirPathForCleanup != null) {
+      try {
+        final d = Directory(_extractedDirPathForCleanup!);
+        if (d.existsSync()) d.deleteSync(recursive: true);
       } catch (e) { /* ignore */ }
     }
     // Dispose focus node
@@ -568,81 +577,113 @@ class _ReadingScreenState extends State<ReadingScreen> {
       final encKeyB64 = dbBook?.encKeyB64 ?? widget.book.encKeyB64;
       final encNonceB64 = dbBook?.encNonceB64 ?? widget.book.encNonceB64;
 
-      // If encrypted: decrypt on click (not on bookshelf)
-      final hasEncMeta = (encBookId != null && encBookId.isNotEmpty) ||
-          (encKeyB64 != null && encKeyB64.isNotEmpty) ||
+      // Encrypted: unzip first (zip has encrypted chapters/assets), then decrypt each file when opening.
+      final hasEncMeta = (encBookId != null && encBookId.isNotEmpty) &&
+          (encKeyB64 != null && encKeyB64.isNotEmpty) &&
           (encNonceB64 != null && encNonceB64.isNotEmpty);
+      Uint8List? contentKey;
+      bool unzipFirstSucceeded = false;
+
       if (hasEncMeta) {
         if (mounted) setState(() { _loadingMessage = 'unlocking'; });
         await Future.delayed(Duration.zero);
-        await isDecryptedFileAvailable(
-          encryptedFilePath: filePath,
-          encBookId: encBookId ?? '',
-        );
-
+        final zipPath = filePath;
         try {
-          final result = await decryptBookFileIfNeeded(
-            encryptedFilePath: filePath,
-            encBookId: encBookId,
-            encKeyB64: encKeyB64,
-            encNonceB64: encNonceB64,
-          );
-          filePath = result.pathToUse;
-          _decryptedCachePath = result.pathToUse;
-          file = File(filePath);
-        } catch (e) {
-          showErr('This book couldn’t be opened. It may be damaged or in the wrong format.');
+          final extractDirPath = await ZipHandler.getExtractDirPath(zipPath);
+          await ZipHandler.extractZipToDir(zipPath, extractDirPath);
+          final indexHtml = await ZipHandler.findIndexHtml(extractDirPath);
+          if (indexHtml != null) {
+            unzipFirstSucceeded = true;
+            _extractedDirPathForCleanup = extractDirPath;
+            contentKey = await BookDecryptionService.getContentKey(
+              bookId: encBookId!,
+              keyEncB64: encKeyB64!,
+              keyNonceB64: encNonceB64!,
+            );
+          }
+        } catch (_) {
+          // Zip invalid or no index (e.g. whole file encrypted): fall back to decrypt whole zip then unzip
+        }
+        if (!unzipFirstSucceeded) {
+          try {
+            final result = await decryptBookFileIfNeeded(
+              encryptedFilePath: zipPath,
+              encBookId: encBookId,
+              encKeyB64: encKeyB64,
+              encNonceB64: encNonceB64,
+            );
+            filePath = result.pathToUse;
+            _decryptedCachePath = result.pathToUse;
+            file = File(filePath);
+          } catch (e) {
+            showErr('This book couldn’t be opened. It may be damaged or in the wrong format.');
+            return;
+          }
+        }
+      }
+
+      Directory bookDirectory;
+      String? indexHtmlPath;
+
+      if (unzipFirstSucceeded && _extractedDirPathForCleanup != null) {
+        bookDirectory = Directory(_extractedDirPathForCleanup!);
+        indexHtmlPath = await ZipHandler.findIndexHtml(bookDirectory.path);
+        if (indexHtmlPath == null) {
+          showErr('This book couldn’t be opened. No index found.');
+          return;
+        }
+      } else {
+        if (mounted) setState(() { _loadingMessage = 'preparing'; });
+        ({String path, bool wasExtracted}) processed;
+        try {
+          processed = await ZipHandler.processBookFileOffMain(filePath);
+          filePath = processed.path;
+        } on FormatException catch (_) {
+          showErr('Incorrect format.');
+          return;
+        }
+        file = File(filePath);
+        final isFile = await file.exists();
+        final dir = Directory(filePath);
+        final isDirectory = await dir.exists();
+        if (isFile) {
+          bookDirectory = file.parent;
+          indexHtmlPath = filePath;
+        } else if (isDirectory) {
+          indexHtmlPath = await ZipHandler.findIndexHtml(filePath);
+          if (indexHtmlPath == null) {
+            showErr('No index.html found in book.');
+            return;
+          }
+          bookDirectory = dir;
+        } else {
+          showErr('This book couldn’t be opened.');
           return;
         }
       }
 
-      if (mounted) setState(() { _loadingMessage = 'preparing'; });
-      ({String path, bool wasExtracted}) processed;
-      try {
-        processed = await ZipHandler.processBookFileOffMain(filePath);
-        filePath = processed.path;
-      } on FormatException catch (_) {
-        showErr('Incorrect format.');
-        return;
-      }
-      
-      if (processed.wasExtracted) {
-      }
-      
-      // Determine the book directory
-      Directory bookDirectory;
-      String? indexHtmlPath;
-      
-      file = File(filePath);
-      final isFile = await file.exists();
-      final dir = Directory(filePath);
-      final isDirectory = await dir.exists();
-      
-      if (isFile) {
-        // It's a file (e.g., index.html), use its parent directory
-        bookDirectory = file.parent;
-        indexHtmlPath = filePath;
-      } else if (isDirectory) {
-        // It's a directory, look for index.html
-        indexHtmlPath = await ZipHandler.findIndexHtml(filePath);
-        
-        if (indexHtmlPath == null) {
-          throw Exception('No index.html found in directory: $filePath');
-        }
-        
-        bookDirectory = Directory(filePath);
-      } else {
-        throw Exception('Path is neither a file nor a directory: $filePath');
+      if (contentKey != null) {
+        if (mounted) setState(() { _loadingMessage = 'verifying'; });
+        await _verifyDecryptionBeforeLoad(
+          bookDirectory: bookDirectory,
+          indexHtmlPath: indexHtmlPath!,
+          contentKey: contentKey,
+        );
+        // Do not block loading: verification is best-effort; decrypt-on-serve will try per file.
       }
 
       if (mounted) setState(() { _loadingMessage = 'loading'; });
-      await _startLocalServer(bookDirectory);
+      await _startLocalServer(bookDirectory, contentKey: contentKey);
       final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path);
       final urlPath = relativePath.replaceAll('\\', '/');
       final httpUrl = 'http://127.0.0.1:$_serverPort/$urlPath';
 
       String bookUrl;
-      if (Platform.isLinux || Platform.isWindows) {
+      if (contentKey != null) {
+        // Encrypted entries: must use HTTP so every request is decrypted on serve
+        _linuxHttpFallbackUrl = null;
+        bookUrl = httpUrl;
+      } else if (Platform.isLinux || Platform.isWindows) {
         // Desktop: try file:// first so WebView doesn't hit localhost restrictions. Fallback to HTTP if it fails.
         bookUrl = Uri.file(indexHtmlPath).toString();
         _linuxHttpFallbackUrl = httpUrl;
@@ -693,6 +734,110 @@ class _ReadingScreenState extends State<ReadingScreen> {
         setState(() { _isLoading = false; _error = friendlyMessage; _loadingMessage = null; });
       }
     }
+  }
+
+  /// Verifies decryption works before loading the book (reads index.html and decrypts it).
+  Future<bool> _verifyDecryptionBeforeLoad({
+    required Directory bookDirectory,
+    required String indexHtmlPath,
+    required Uint8List contentKey,
+  }) async {
+    try {
+      final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path).replaceAll('\\', '/');
+      final file = File(indexHtmlPath);
+      if (!await file.exists()) return false;
+      final bytes = await file.readAsBytes();
+      Uint8List? decrypted;
+      try {
+        decrypted = await BookDecryptionService.decryptFileBytes(
+          encryptedBytes: bytes,
+          contentKey: contentKey,
+          requestedPath: relativePath,
+          aad: [],
+        );
+      } catch (_) {
+        try {
+          decrypted = await BookDecryptionService.decryptFileBytes(
+            encryptedBytes: bytes,
+            contentKey: contentKey,
+            requestedPath: relativePath,
+            aad: utf8.encode(relativePath),
+          );
+        } catch (_) {
+          return false;
+        }
+      }
+      if (decrypted != null && decrypted.length > 0) {
+        BookDecryptionService.logDecryptSuccess(path: relativePath, size: decrypted.length);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Logs each server request to decrypt_log.txt (path, status, note) to debug blank chapter content.
+  static void _logServerRequest(String requestedPath, int status, String note) {
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent;
+      final logFile = File(path.join(exeDir.path, 'decrypt_log.txt'));
+      final line = '${DateTime.now().toIso8601String()} request: $requestedPath -> $status $note\n';
+      logFile.writeAsStringSync(line, mode: FileMode.append);
+    } catch (_) {}
+  }
+
+  /// Logs book directory structure at server start so we can see where chapter/webp files live.
+  static Future<void> _logBookDirectoryStructure(Directory bookDirectory) async {
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent;
+      final logFile = File(path.join(exeDir.path, 'decrypt_log.txt'));
+      final buffer = StringBuffer()
+        ..writeln('---')
+        ..writeln('${DateTime.now().toIso8601String()} book dir: ${bookDirectory.path}')
+        ..writeln('listing (first 100 entries):');
+      var count = 0;
+      await for (final entity in bookDirectory.list(recursive: true)) {
+        if (count >= 100) break;
+        final rel = path.relative(entity.path, from: bookDirectory.path).replaceAll('\\', '/');
+        buffer.writeln('  $rel');
+        count++;
+      }
+      buffer.writeln('---');
+      await logFile.writeAsString(buffer.toString(), mode: FileMode.append);
+    } catch (_) {}
+  }
+
+  /// Tries alternate path patterns for chapter/webp (e.g. page/1.webp -> pages/1.webp, or find by filename).
+  static Future<String?> _resolveChapterPathFallback(Directory bookDirectory, String requestedPath) async {
+    final fileName = path.basename(requestedPath);
+    if (fileName.isEmpty) return null;
+    final alternates = <String>[
+      requestedPath,
+      requestedPath.replaceFirst('page/', 'pages/'),
+      requestedPath.replaceFirst('pages/', 'page/'),
+      requestedPath.replaceFirst('page/', 'chapters/'),
+      requestedPath.replaceFirst('chapters/', 'page/'),
+      requestedPath.replaceFirst('chapters/', 'pages/'),
+      'pages/$fileName',
+      'page/$fileName',
+      'chapters/$fileName',
+      fileName,
+    ];
+    for (final alt in alternates) {
+      if (alt == requestedPath) continue;
+      final full = path.join(bookDirectory.path, alt);
+      final f = File(full);
+      if (await f.exists()) return full;
+    }
+    try {
+      await for (final entity in bookDirectory.list(recursive: true)) {
+        if (entity is File && path.basename(entity.path).toLowerCase() == fileName.toLowerCase()) {
+          return entity.path;
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// Resolves path case-insensitively so "css/file.css" finds "CSS/file.css" on Android.
@@ -763,9 +908,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
     }
   }
 
-  /// Starts a local HTTP server to serve book files
-  /// This bypasses Android 10+ file:// access restrictions
-  Future<void> _startLocalServer(Directory bookDirectory) async {
+  /// Starts a local HTTP server to serve book files.
+  /// If [contentKey] is set, each file is decrypted on-the-fly when served (no decrypted data persisted).
+  Future<void> _startLocalServer(Directory bookDirectory, {Uint8List? contentKey}) async {
     // Stop any existing server first
     await _stopLocalServer();
     
@@ -783,6 +928,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
       }
     }
     
+    // Log book directory structure at startup (so we can see what paths exist for chapters/webp)
+    await _logBookDirectoryStructure(bookDirectory);
+
     // Handle incoming requests
     _localServer!.listen((HttpRequest request) async {
       try {
@@ -813,6 +961,23 @@ class _ReadingScreenState extends State<ReadingScreen> {
             file = File(filePath);
           }
         }
+        if (!await file.exists()) {
+          final fallback = await _resolveChapterPathFallback(bookDirectory, requestedPath);
+          if (fallback != null) {
+            filePath = fallback;
+            file = File(filePath);
+          }
+        }
+
+        if (!await file.exists()) {
+          _logServerRequest(requestedPath, 404, 'not found');
+          request.response
+            ..statusCode = HttpStatus.notFound
+            ..headers.set('Content-Type', 'text/plain; charset=utf-8')
+            ..write('File not found: ${request.uri.path}')
+            ..close();
+          return;
+        }
 
         if (await file.exists()) {
           var ext = path.extension(filePath).toLowerCase();
@@ -820,20 +985,46 @@ class _ReadingScreenState extends State<ReadingScreen> {
             ext = '.${requestedPath.split('.').last.toLowerCase()}';
           }
           final String mimeStr = _mimeTypeForExtension(ext);
+          // Use resolved path for AAD when file was found via fallback (so decrypt matches encryption path).
+          final pathForDecrypt = path.relative(filePath, from: bookDirectory.path).replaceAll('\\', '/');
 
-          final fileBytes = await file.readAsBytes();
+          var fileBytes = await file.readAsBytes();
+          var servedNote = 'ok';
+          if (contentKey != null) {
+            try {
+              fileBytes = await BookDecryptionService.decryptFileBytesWithOptionalAad(
+                encryptedBytes: fileBytes,
+                contentKey: contentKey,
+                requestedPath: pathForDecrypt,
+              );
+              servedNote = 'decrypted';
+            } catch (e) {
+              BookDecryptionService.logDecryptFailure(
+                requestedPath: requestedPath,
+                fileSizeBytes: fileBytes.length,
+                error: e,
+              );
+              final isMacError = e.toString().toLowerCase().contains('mac') ||
+                  e.toString().toLowerCase().contains('secretboxauthentication');
+              if (!isMacError) {
+                _logServerRequest(requestedPath, 500, 'decrypt failed');
+                request.response
+                  ..statusCode = HttpStatus.internalServerError
+                  ..headers.set('Content-Type', 'text/plain; charset=utf-8')
+                  ..write('Decryption failed: $e')
+                  ..close();
+                return;
+              }
+              servedNote = 'plain (decrypt failed)';
+            }
+          }
+          _logServerRequest(requestedPath, 200, servedNote);
           final response = request.response;
           response.headers.set('Content-Type', mimeStr);
           response.headers.contentType = ContentType.parse(mimeStr);
           response.headers.contentLength = fileBytes.length;
           response.add(fileBytes);
           response.close();
-        } else {
-          request.response
-            ..statusCode = HttpStatus.notFound
-            ..headers.set('Content-Type', 'text/plain; charset=utf-8')
-            ..write('File not found: ${request.uri.path}')
-            ..close();
         }
       } catch (e) {
         request.response

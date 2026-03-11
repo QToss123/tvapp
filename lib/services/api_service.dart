@@ -12,7 +12,7 @@ import 'package:tv_app_books/utils/device_id_helper.dart';
 /// API Service for handling license validation and other API calls
 class ApiService {
 
-  static const String baseUrl = 'https://burlington-celp.adurox.com/api/v1';
+  static const String baseUrl = 'https://be-celp.adurox.com/api/v1';
 
   
   //static const String baseUrl = 'https://licenses.dbk.dev.burlingtonenglish.in/api/v1';

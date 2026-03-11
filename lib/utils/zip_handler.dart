@@ -143,6 +143,12 @@ class ZipHandler {
       ),
     );
   }
+
+  /// Returns the extract directory path for a zip (for cleanup or unzip-first flow).
+  static Future<String> getExtractDirPath(String zipFilePath) async {
+    final dir = await _getExtractDir(zipFilePath);
+    return dir.path;
+  }
 }
 
 /// Top-level for compute(). Extracts zip to dir; returns extracted path or null.
