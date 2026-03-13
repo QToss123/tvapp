@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -736,17 +737,32 @@ class _ReadingScreenState extends State<ReadingScreen> {
     }
   }
 
-  /// Verifies decryption works before loading the book (reads index.html and decrypts it).
+  /// True when [requestedPath] is under the resources folder (only these are encrypted).
+  static bool _isEncryptedPath(String requestedPath) {
+    final normalized = requestedPath.replaceAll('\\', '/').toLowerCase().trim();
+    return normalized.startsWith('resources/');
+  }
+
+  /// Verifies decryption works before loading (decrypts one file under resources/; only resources folder is encrypted).
   Future<bool> _verifyDecryptionBeforeLoad({
     required Directory bookDirectory,
     required String indexHtmlPath,
     required Uint8List contentKey,
   }) async {
     try {
-      final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path).replaceAll('\\', '/');
-      final file = File(indexHtmlPath);
-      if (!await file.exists()) return false;
-      final bytes = await file.readAsBytes();
+      // Only resources/ content is encrypted: find one file under resources/ to verify
+      final resourcesDir = Directory(path.join(bookDirectory.path, 'resources'));
+      if (!await resourcesDir.exists()) return true; // no resources, nothing to verify
+      File? firstUnderResources;
+      await for (final entity in resourcesDir.list(recursive: true)) {
+        if (entity is File) {
+          firstUnderResources = entity;
+          break;
+        }
+      }
+      if (firstUnderResources == null) return true;
+      final relativePath = path.relative(firstUnderResources.path, from: bookDirectory.path).replaceAll('\\', '/');
+      final bytes = await firstUnderResources.readAsBytes();
       Uint8List? decrypted;
       try {
         decrypted = await BookDecryptionService.decryptFileBytes(
@@ -784,6 +800,34 @@ class _ReadingScreenState extends State<ReadingScreen> {
       final logFile = File(path.join(exeDir.path, 'decrypt_log.txt'));
       final line = '${DateTime.now().toIso8601String()} request: $requestedPath -> $status $note\n';
       logFile.writeAsStringSync(line, mode: FileMode.append);
+    } catch (_) {}
+  }
+
+  /// Logs whether decryption worked for a page (so you can see "DECRYPTION ON PAGE: OK/FAIL" in decrypt_log.txt).
+  static void _logDecryptionOnPage(bool success, String requestedPath, {int? sizeBytes, Object? error}) {
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent;
+      final logFile = File(path.join(exeDir.path, 'decrypt_log.txt'));
+      final status = success ? 'OK' : 'FAIL';
+      final sizeStr = sizeBytes != null ? ' ($sizeBytes bytes)' : '';
+      final errorStr = error != null ? ' error: $error' : '';
+      final line = '${DateTime.now().toIso8601String()} DECRYPTION ON PAGE: $status $requestedPath$sizeStr$errorStr\n';
+      logFile.writeAsStringSync(line, mode: FileMode.append);
+    } catch (_) {}
+  }
+
+  /// In debug mode, writes decrypted page/asset to debug_decrypted_pages/ for inspection.
+  static Future<void> _debugSaveDecryptedPage(String requestedPath, Uint8List bytes) async {
+    if (!kDebugMode) return;
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent;
+      final safePath = requestedPath.replaceAll('..', '_').replaceAll('\\', '/').trimLeft();
+      final dir = Directory(path.join(exeDir.path, 'debug_decrypted_pages'));
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final outPath = path.join(dir.path, safePath);
+      final outFile = File(outPath);
+      await outFile.parent.create(recursive: true);
+      await outFile.writeAsBytes(bytes);
     } catch (_) {}
   }
 
@@ -990,7 +1034,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
           var fileBytes = await file.readAsBytes();
           var servedNote = 'ok';
-          if (contentKey != null) {
+          // Only resources/ folder content is encrypted; serve everything else as plain
+          if (contentKey != null && _isEncryptedPath(pathForDecrypt)) {
             try {
               fileBytes = await BookDecryptionService.decryptFileBytesWithOptionalAad(
                 encryptedBytes: fileBytes,
@@ -998,7 +1043,10 @@ class _ReadingScreenState extends State<ReadingScreen> {
                 requestedPath: pathForDecrypt,
               );
               servedNote = 'decrypted';
+              _logDecryptionOnPage(true, requestedPath, sizeBytes: fileBytes.length);
+              await _debugSaveDecryptedPage(requestedPath, fileBytes);
             } catch (e) {
+              _logDecryptionOnPage(false, requestedPath, error: e);
               BookDecryptionService.logDecryptFailure(
                 requestedPath: requestedPath,
                 fileSizeBytes: fileBytes.length,

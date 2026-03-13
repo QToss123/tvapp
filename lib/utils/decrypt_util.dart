@@ -112,6 +112,19 @@ Future<DecryptResult> decryptBookFileIfNeeded({
   if (!await verify.exists()) {
     throw Exception('Decryption completed but decrypted file not found: $decryptedPath');
   }
+
+  // Debug: copy decrypted book to a folder next to the executable for inspection
+  if (kDebugMode) {
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent;
+      final debugDir = Directory(path.join(exeDir.path, 'debug_decrypted'));
+      if (!await debugDir.exists()) await debugDir.create(recursive: true);
+      final baseName = path.basename(decryptedPath);
+      final destPath = path.join(debugDir.path, baseName);
+      await verify.copy(destPath);
+    } catch (_) {}
+  }
+
   return DecryptResult(
     pathToUse: decryptedPath,
     wasDecrypted: true,
