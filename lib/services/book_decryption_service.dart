@@ -303,8 +303,31 @@ class BookDecryptionService {
     } catch (_) {}
   }
 
-  /// Max size for a single chapter/asset when decrypting on demand (avoid OOM).
-  static const int maxPerFileDecryptBytes = 10 * 1024 * 1024; // 10 MB
+  /// Default max size for a single encrypted chapter/asset when decrypting on demand.
+  /// Tuned for Android TV: moderate increase to support real books while controlling OOM risk.
+  static int get maxPerFileDecryptBytes =>
+      Platform.isAndroid ? 1024 * 1024 : 10 * 1024 * 1024; // 1 MB on Android, 10 MB elsewhere
+
+  /// Higher cap for encrypted video assets (mp4/webm) which are usually larger than pages.
+  static int get maxPerVideoDecryptBytes =>
+      Platform.isAndroid ? 5 * 1024 * 1024 : 20 * 1024 * 1024; // 5 MB on Android, 20 MB elsewhere
+
+  /// Slightly higher cap for animation videos folder, which often contains bigger MP4 assets.
+  static int get maxPerAnimationVideoDecryptBytes =>
+      Platform.isAndroid ? 8 * 1024 * 1024 : 24 * 1024 * 1024; // 8 MB on Android, 24 MB elsewhere
+
+  /// Per-path decrypt cap: videos get a higher cap than other encrypted assets.
+  static int maxDecryptBytesForPath(String requestedPath) {
+    final lower = requestedPath.toLowerCase();
+    if ((lower.endsWith('.mp4') || lower.endsWith('.webm')) &&
+        lower.startsWith('resources/animations/')) {
+      return maxPerAnimationVideoDecryptBytes;
+    }
+    if (lower.endsWith('.mp4') || lower.endsWith('.webm')) {
+      return maxPerVideoDecryptBytes;
+    }
+    return maxPerFileDecryptBytes;
+  }
 
   /// Returns the content key for a book (cache this for the reading session).
   static Future<Uint8List> getContentKey({
@@ -328,9 +351,12 @@ class BookDecryptionService {
     String? requestedPath,
     List<int>? aad,
   }) async {
-    if (encryptedBytes.length > maxPerFileDecryptBytes) {
+    final maxAllowed = requestedPath == null
+        ? maxPerFileDecryptBytes
+        : maxDecryptBytesForPath(requestedPath);
+    if (encryptedBytes.length > maxAllowed) {
       throw Exception(
-        'File too large to decrypt (${(encryptedBytes.length / (1024 * 1024)).toStringAsFixed(1)} MB). Max: ${maxPerFileDecryptBytes ~/ (1024 * 1024)} MB.',
+        'File too large to decrypt (${(encryptedBytes.length / (1024 * 1024)).toStringAsFixed(1)} MB). Max: ${(maxAllowed / (1024 * 1024)).toStringAsFixed(1)} MB.',
       );
     }
     final aadList = aad ?? [];
@@ -365,26 +391,72 @@ class BookDecryptionService {
     );
   }
 
+  /// Call from reading screen / HTTP server when file is intentionally blocked by size cap.
+  static void logDecryptBlocked({
+    required String requestedPath,
+    required int fileSizeBytes,
+    required int maxAllowedBytes,
+  }) {
+    _logDecrypt(
+      'serve decrypt blocked (file too large)',
+      requestedPath: requestedPath,
+      dataLength: fileSizeBytes,
+      error: 'max_allowed_bytes=$maxAllowedBytes',
+    );
+  }
+
+  /// Generic timeline/event logging (for click/decrypt/range diagnostics).
+  static void logServerEvent({
+    required String message,
+    String? requestedPath,
+    int? sizeBytes,
+    Object? details,
+  }) {
+    _logDecrypt(
+      message,
+      requestedPath: requestedPath,
+      dataLength: sizeBytes,
+      error: details,
+    );
+  }
+
   /// Tries decrypt with empty AAD first, then with [requestedPath] as AAD (UTF-8). Use for per-file AAD schemes.
   static Future<Uint8List> decryptFileBytesWithOptionalAad({
     required Uint8List encryptedBytes,
     required Uint8List contentKey,
     required String requestedPath,
   }) async {
+    final normalized = requestedPath.replaceAll('\\', '/');
+    final lower = normalized.toLowerCase();
+    final withLeading = normalized.startsWith('/') ? normalized : '/$normalized';
+    final lowerWithLeading = lower.startsWith('/') ? lower : '/$lower';
+
+    Future<Uint8List> tryWith(List<int> aad) {
+      return decryptFileBytes(
+        encryptedBytes: encryptedBytes,
+        contentKey: contentKey,
+        requestedPath: requestedPath,
+        aad: aad,
+      );
+    }
+
     try {
-      return await decryptFileBytes(
-        encryptedBytes: encryptedBytes,
-        contentKey: contentKey,
-        requestedPath: requestedPath,
-        aad: [],
-      );
+      return await tryWith([]);
     } catch (_) {
-      return await decryptFileBytes(
-        encryptedBytes: encryptedBytes,
-        contentKey: contentKey,
-        requestedPath: requestedPath,
-        aad: utf8.encode(requestedPath),
-      );
+      // Try common AAD path variants used by different packers.
+      try {
+        return await tryWith(utf8.encode(normalized));
+      } catch (_) {
+        try {
+          return await tryWith(utf8.encode(lower));
+        } catch (_) {
+          try {
+            return await tryWith(utf8.encode(withLeading));
+          } catch (_) {
+            return await tryWith(utf8.encode(lowerWithLeading));
+          }
+        }
+      }
     }
   }
 

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -10,8 +11,11 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:path/path.dart' as path;
 import '../models/book.dart';
 import '../utils/zip_handler.dart';
+import '../utils/book_manifest.dart';
 import '../services/database_service.dart';
 import '../services/book_decryption_service.dart';
+import '../services/book_server_isolate.dart' as isolate_runner;
+import '../services/video_predecrypt_service.dart';
 import '../utils/decrypt_util.dart';
 
 /// Intent for TV remote key directions
@@ -49,6 +53,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
   String? _error;
   HttpServer? _localServer;
   int _serverPort = 8080;
+  /// When server runs in isolate (Android), used to send 'close' on dispose.
+  Isolate? _serverIsolate;
+  SendPort? _serverIsolateSendPort;
   final FocusNode _webViewFocusNode = FocusNode();
   /// Linux fallback: HTTP URL to retry if file:// fails
   String? _linuxHttpFallbackUrl;
@@ -91,13 +98,20 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
   @override
   void dispose() {
-    // Defer server close so WebView can finish teardown first (reduces crash on Back)
     final server = _localServer;
+    final webController = _controller;
+    final isolateSendPort = _serverIsolateSendPort;
     _localServer = null;
-    if (server != null) {
+    _serverIsolateSendPort = null;
+    _serverIsolate = null;
+    if (isolateSendPort != null) {
+      try { isolateSendPort.send('close'); } catch (_) {}
+    }
+    if (server != null || webController != null) {
       Future.delayed(const Duration(milliseconds: 1200), () async {
         try {
-          await server.close(force: true);
+          if (server != null) await server.close(force: true);
+          await webController?.clearCache();
         } catch (_) { /* ignore */ }
       });
     }
@@ -251,6 +265,229 @@ class _ReadingScreenState extends State<ReadingScreen> {
     } catch (e) { /* ignore */ }
   }
 
+  /// Prevents loading all flipbook assets at once: lazy-loads images and defers off-screen content.
+  /// Reduces Dart/GPU memory and GraphicBuffer failures on Android when books have 1000+ assets.
+  Future<void> _injectFlipbookLazyLoad() async {
+    try {
+      const jsCode = r'''
+        (function() {
+          var style = document.createElement('style');
+          style.id = 'flipbook-memory-fixes';
+          style.textContent = [
+            'img { max-width: 100% !important; height: auto !important; object-fit: contain !important; }',
+            '.page-container img, .flipbook-page img, [class*="page"] img { max-width: 100% !important; height: auto !important; }',
+            'canvas { max-width: 100% !important; height: auto !important; }'
+          ].join('\n');
+          if (!document.getElementById('flipbook-memory-fixes')) document.head.appendChild(style);
+
+          [].forEach.call(document.querySelectorAll('img'), function(img) {
+            img.loading = 'lazy';
+            var dataSrc = img.getAttribute('data-src');
+            if (dataSrc && !img.src) {
+              img.setAttribute('data-src-defer', dataSrc);
+              img.removeAttribute('data-src');
+            }
+          });
+
+          var dataSrcDefer = document.querySelectorAll('img[data-src-defer]');
+          if (dataSrcDefer.length === 0) return;
+          var io = new IntersectionObserver(function(entries) {
+            entries.forEach(function(entry) {
+              if (!entry.isIntersecting) return;
+              var img = entry.target;
+              var src = img.getAttribute('data-src-defer');
+              if (src) {
+                img.src = src;
+                img.removeAttribute('data-src-defer');
+                io.unobserve(img);
+              }
+            });
+          }, { rootMargin: '200px', threshold: 0.01 });
+          dataSrcDefer.forEach(function(img) { io.observe(img); });
+        })();
+      ''';
+      await _controller?.runJavaScript(jsCode);
+    } catch (e) { /* ignore */ }
+  }
+
+  /// Keep HTML5 video inline in WebView and avoid fullscreen takeover on TV.
+  Future<void> _injectVideoPlaybackFixes() async {
+    try {
+      const jsCode = r'''
+        (function() {
+          function normalizeBookUrl(u) {
+            if (!u || typeof u !== 'string') return u;
+            if (u.startsWith('http://') || u.startsWith('https://') || u.startsWith('blob:') || u.startsWith('data:')) return u;
+            if (u.startsWith('resources/')) return '/' + u;
+            return u;
+          }
+
+          function patchVideo(v) {
+            if (!v) return;
+            try {
+              v.setAttribute('playsinline', 'true');
+              v.setAttribute('webkit-playsinline', 'true');
+              v.setAttribute('x5-playsinline', 'true');
+              if (!v.getAttribute('preload')) v.setAttribute('preload', 'metadata');
+              if (!v.hasAttribute('controls')) v.setAttribute('controls', 'controls');
+              v.playsInline = true;
+              v.controls = true;
+            } catch (_) {}
+            try {
+              v.addEventListener('webkitbeginfullscreen', function(e) {
+                try { e.preventDefault(); } catch (_) {}
+                try { document.exitFullscreen && document.exitFullscreen(); } catch (_) {}
+              });
+            } catch (_) {}
+            try {
+              v.addEventListener('click', function() {
+                try {
+                  if (window.FlutterChannel && window.FlutterChannel.postMessage) {
+                    window.FlutterChannel.postMessage('video_click:' + String(v.currentSrc || v.src || ''));
+                  }
+                } catch (_) {}
+                var p = v.play && v.play();
+                if (p && p.catch) p.catch(function(){});
+              });
+            } catch (_) {}
+          }
+
+          function openTvOverlayVideo(normalizedSrc) {
+            var old = document.getElementById('tv-video-overlay');
+            if (old && old.parentNode) old.parentNode.removeChild(old);
+            var overlay = document.createElement('div');
+            overlay.id = 'tv-video-overlay';
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:2147483647;display:flex;align-items:center;justify-content:center;';
+            var wrap = document.createElement('div');
+            wrap.style.cssText = 'position:relative;width:92vw;height:82vh;max-width:1280px;';
+            var closeBtn = document.createElement('button');
+            closeBtn.textContent = 'Close';
+            closeBtn.style.cssText = 'position:absolute;right:8px;top:8px;z-index:2;padding:8px 12px;background:#111;color:#fff;border:1px solid #666;border-radius:6px;';
+            var v = document.createElement('video');
+            v.setAttribute('playsinline', 'true');
+            v.setAttribute('webkit-playsinline', 'true');
+            v.controls = true;
+            v.autoplay = true;
+            v.preload = 'metadata';
+            v.style.cssText = 'width:100%;height:100%;background:#000;object-fit:contain;';
+            v.src = normalizedSrc;
+            closeBtn.onclick = function() {
+              try { v.pause(); } catch (_) {}
+              if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            };
+            wrap.appendChild(v);
+            wrap.appendChild(closeBtn);
+            overlay.appendChild(wrap);
+            overlay.addEventListener('click', function(e) {
+              if (e.target === overlay) closeBtn.click();
+            });
+            document.body.appendChild(overlay);
+            var p = v.play && v.play();
+            if (p && p.catch) p.catch(function(){});
+          }
+
+          function shouldUseTvOverlay(normalizedSrc) {
+            var lower = String(normalizedSrc || '').toLowerCase();
+            return lower.indexOf('/resources/animations/') !== -1 && lower.endsWith('.mp4');
+          }
+
+          function patchOpenFancyIfPresent() {
+            if (typeof window.openFancyModalVideo !== 'function') return false;
+            if (window.openFancyModalVideo.__tvPatched) return true;
+            var __origOpenFancyModalVideo = window.openFancyModalVideo;
+            var wrapped = function(src, size) {
+              var normalizedSrc = normalizeBookUrl(src);
+              try {
+                if (window.FlutterChannel && window.FlutterChannel.postMessage) {
+                  window.FlutterChannel.postMessage('video_openFancy:' + String(src || ''));
+                }
+              } catch (_) {}
+              try {
+                if (shouldUseTvOverlay(normalizedSrc)) {
+                  openTvOverlayVideo(normalizedSrc);
+                  return;
+                }
+              } catch (_) {}
+              return __origOpenFancyModalVideo.call(window, normalizedSrc, size);
+            };
+            wrapped.__tvPatched = true;
+            window.openFancyModalVideo = wrapped;
+            return true;
+          }
+
+          try {
+            if (!window.__tvInlineVideoPatched) {
+              window.__tvInlineVideoPatched = true;
+              patchOpenFancyIfPresent();
+              // Some book scripts define openFancyModalVideo late; retry briefly.
+              var __tries = 0;
+              var __timer = setInterval(function() {
+                __tries++;
+                if (patchOpenFancyIfPresent() || __tries > 20) {
+                  clearInterval(__timer);
+                }
+              }, 500);
+              if (window.HTMLVideoElement && window.HTMLVideoElement.prototype) {
+                window.HTMLVideoElement.prototype.requestFullscreen = function() {
+                  var p = this.play && this.play();
+                  return (p && p.then) ? p : Promise.resolve();
+                };
+                window.HTMLVideoElement.prototype.webkitEnterFullscreen = function() {
+                  var p = this.play && this.play();
+                  return (p && p.then) ? p : Promise.resolve();
+                };
+              }
+            }
+          } catch (_) {}
+
+          // Direct fallback for inline onclick="openFancyModalVideo('...')"
+          // in case function wrapping misses due script timing.
+          document.addEventListener('click', function(ev) {
+            var el = ev.target && (ev.target.closest ? ev.target.closest('[onclick]') : null);
+            if (!el) return;
+            var raw = String(el.getAttribute('onclick') || '');
+            if (raw.indexOf('openFancyModalVideo') === -1) return;
+            var m = raw.match(/openFancyModalVideo\(\s*['"]([^'"]+)['"]/i);
+            if (!m || !m[1]) return;
+            var normalizedSrc = normalizeBookUrl(m[1]);
+            if (!shouldUseTvOverlay(normalizedSrc)) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            try {
+              if (window.FlutterChannel && window.FlutterChannel.postMessage) {
+                window.FlutterChannel.postMessage('video_openFancy:' + String(m[1]));
+              }
+            } catch (_) {}
+            openTvOverlayVideo(normalizedSrc);
+          }, true);
+
+          document.querySelectorAll('video').forEach(patchVideo);
+          document.querySelectorAll('source').forEach(function(s) {
+            try { s.src = normalizeBookUrl(s.getAttribute('src')); } catch (_) {}
+          });
+          var mo = new MutationObserver(function(muts) {
+            muts.forEach(function(m) {
+              if (!m.addedNodes) return;
+              Array.prototype.forEach.call(m.addedNodes, function(n) {
+                if (!n) return;
+                if (n.tagName && n.tagName.toLowerCase() === 'video') patchVideo(n);
+                if (n.tagName && n.tagName.toLowerCase() === 'source') {
+                  try { n.src = normalizeBookUrl(n.getAttribute('src')); } catch (_) {}
+                }
+                if (n.querySelectorAll) n.querySelectorAll('video').forEach(patchVideo);
+                if (n.querySelectorAll) n.querySelectorAll('source').forEach(function(s) {
+                  try { s.src = normalizeBookUrl(s.getAttribute('src')); } catch (_) {}
+                });
+              });
+            });
+          });
+          mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
+        })();
+      ''';
+      await _controller?.runJavaScript(jsCode);
+    } catch (_) { /* ignore */ }
+  }
+
   /// Injects JavaScript: visible TV cursor, focus styles, and prev/next mapping
   Future<void> _enableKeyboardNavigation() async {
     try {
@@ -299,12 +536,19 @@ class _ReadingScreenState extends State<ReadingScreen> {
           console.log('TV cursor and keyboard nav enabled');
         })();
       ''';
-      await _controller?.runJavaScript(jsCode);
+      //await _controller?.runJavaScript(jsCode);
     } catch (e) { /* ignore */ }
   }
 
-  /// Stops the local HTTP server
+  /// Stops the local HTTP server (and server isolate on Android).
   Future<void> _stopLocalServer() async {
+    if (_serverIsolateSendPort != null) {
+      try {
+        _serverIsolateSendPort!.send('close');
+      } catch (_) {}
+      _serverIsolateSendPort = null;
+      _serverIsolate = null;
+    }
     if (_localServer != null) {
       try {
         await _localServer!.close(force: true);
@@ -314,6 +558,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
   }
 
 
+  /// WebView controller is created once in initState and reused for the whole screen lifetime.
+  /// Never create a new controller in build() to avoid recreating the platform WebView and losing state/memory.
   void _initializeWebView() {
     try {
       final c = WebViewController()
@@ -323,6 +569,20 @@ class _ReadingScreenState extends State<ReadingScreen> {
         ..addJavaScriptChannel(
           'FlutterChannel',
           onMessageReceived: (JavaScriptMessage message) {
+            final msg = message.message;
+            if (msg.startsWith('video_click:')) {
+              final src = msg.substring('video_click:'.length);
+              BookDecryptionService.logServerEvent(
+                message: 'video click received',
+                requestedPath: src,
+              );
+            } else if (msg.startsWith('video_openFancy:')) {
+              final src = msg.substring('video_openFancy:'.length);
+              BookDecryptionService.logServerEvent(
+                message: 'openFancyModalVideo called',
+                requestedPath: src,
+              );
+            }
           },
         )
         ..setNavigationDelegate(
@@ -337,6 +597,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
               _linuxHttpFallbackUrl = null;
               if (mounted) setState(() { _isLoading = false; _loadingMessage = null; });
               _injectBookFixes();
+              _injectFlipbookLazyLoad();
+              _injectVideoPlaybackFixes();
               if (_useTvCursor) {
                 _requestWebViewFocus();
                 _enableKeyboardNavigation();
@@ -358,7 +620,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
                 if (mounted) {
                   setState(() {
                     _isLoading = false;
-                    _error = 'This book couldn’t be opened.';
+                    _error = Platform.isAndroid
+                        ? 'This book couldn’t be opened. Low memory. Close other apps, restart device. On TV, use a release build: flutter build apk.'
+                        : 'This book couldn’t be opened.';
                   });
                 }
               }
@@ -543,13 +807,19 @@ class _ReadingScreenState extends State<ReadingScreen> {
     if (mounted) setState(() { _isLoading = true; _error = null; _loadingMessage = 'opening'; });
     await Future.delayed(Duration.zero); // Let loading indicator paint once
 
-    // Show "Opening book..." in WebView immediately so user sees it instead of black (desktop WebView draws on top of Flutter overlay)
+    // Show "Opening book..." in WebView so user sees it instead of black (desktop WebView draws on top of Flutter overlay).
+    // On Android use minimal about:blank first to reduce heap before book load; Flutter loading overlay shows the message.
     if (mounted && _controller != null) {
-      _controller!.loadHtmlString(
-        '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
-        '<body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui,sans-serif;color:#555;background:#fff;">'
-        '<p style="font-size:1.1em;">Opening book...</p></body></html>',
-      );
+      if (Platform.isAndroid) {
+        _controller!.loadRequest(Uri.parse('about:blank'));
+      } else {
+        final openingText = 'Opening book...';
+        _controller!.loadHtmlString(
+          '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+          '<body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui,sans-serif;color:#555;background:#fff;">'
+          '<p style="font-size:1.1em;">$openingText</p></body></html>',
+        );
+      }
     }
 
     void showErr(String message) {
@@ -590,8 +860,14 @@ class _ReadingScreenState extends State<ReadingScreen> {
         await Future.delayed(Duration.zero);
         final zipPath = filePath;
         try {
+          // Extract to disk only; never load the entire ZIP into memory (avoids OOM with large flipbooks).
           final extractDirPath = await ZipHandler.getExtractDirPath(zipPath);
-          await ZipHandler.extractZipToDir(zipPath, extractDirPath);
+          // On Android run unzip in background isolate to avoid main-thread heap pressure and skipped frames.
+          if (Platform.isAndroid) {
+            final _ = await compute(extractZipToDirBackground, (zipPath, extractDirPath));
+          } else {
+            await ZipHandler.extractZipToDir(zipPath, extractDirPath);
+          }
           final indexHtml = await ZipHandler.findIndexHtml(extractDirPath);
           if (indexHtml != null) {
             unzipFirstSucceeded = true;
@@ -663,7 +939,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
         }
       }
 
-      if (contentKey != null) {
+      if (contentKey != null && !Platform.isAndroid) {
+        // Skip verification on Android to avoid any read+decrypt on main isolate (reduces "Exhausted heap space").
         if (mounted) setState(() { _loadingMessage = 'verifying'; });
         await _verifyDecryptionBeforeLoad(
           bookDirectory: bookDirectory,
@@ -675,10 +952,15 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
       if (mounted) setState(() { _loadingMessage = 'loading'; });
       await _startLocalServer(bookDirectory, contentKey: contentKey);
+      if (Platform.isAndroid && contentKey != null) {
+        unawaited(_predecryptVideosInBackground(bookDirectory, contentKey));
+      }
       final relativePath = path.relative(indexHtmlPath, from: bookDirectory.path);
       final urlPath = relativePath.replaceAll('\\', '/');
       final httpUrl = 'http://127.0.0.1:$_serverPort/$urlPath';
 
+      // Book is always loaded from a URL (local HTTP or file://), never from in-memory HTML.
+      // This keeps the flipbook and its 1000+ assets streamed from disk/server instead of buffered in Dart.
       String bookUrl;
       if (contentKey != null) {
         // Encrypted entries: must use HTTP so every request is decrypted on serve
@@ -700,12 +982,32 @@ class _ReadingScreenState extends State<ReadingScreen> {
           // If file:// fails, onWebResourceError will retry with HTTP fallback
         });
       } else {
-        // Android/Android TV: WebView is often not attached until after the dialog closes and a frame runs.
-        // Post-frame + 300ms delay so the book opens reliably after decrypt/unzip.
+        // Android/Android TV: two-phase load to avoid "Exhausted heap space" and blank screen.
+        // 1) Clear cache, wait, load a minimal page so WebView/Chromium finish startup (codec probe, EGL).
+        // 2) Wait longer, then load the book URL so we don't hit OOM when Chromium and Dart are both under pressure.
         if (mounted) setState(() => _isLoading = true);
         WidgetsBinding.instance.addPostFrameCallback((_) async {
-          await Future.delayed(const Duration(milliseconds: 300));
+          try {
+            await _controller?.clearCache();
+          } catch (_) {}
+          await Future.delayed(const Duration(milliseconds: 1500));
           if (!mounted) return;
+          for (int i = 0; i < 3; i++) {
+            await Future.delayed(Duration.zero);
+            if (!mounted) return;
+          }
+          try {
+            const loadingDataUrl = "data:text/html;charset=utf-8,"
+                "%3C!DOCTYPE html%3E%3Chtml%3E%3Cbody style='margin:0;display:flex;align-items:center;justify-content:center;"
+                "height:100vh;font-family:system-ui;color:%23666;'%3EOpening book...%3C/body%3E%3C/html%3E";
+            _controller?.loadRequest(Uri.parse(loadingDataUrl));
+          } catch (_) {}
+          await Future.delayed(const Duration(milliseconds: 3500));
+          if (!mounted) return;
+          for (int i = 0; i < 5; i++) {
+            await Future.delayed(Duration.zero);
+            if (!mounted) return;
+          }
           try {
             _controller?.loadRequest(Uri.parse(bookUrl));
           } catch (e) {
@@ -737,13 +1039,13 @@ class _ReadingScreenState extends State<ReadingScreen> {
     }
   }
 
-  /// True when [requestedPath] is under the resources folder (only these are encrypted).
-  static bool _isEncryptedPath(String requestedPath) {
-    final normalized = requestedPath.replaceAll('\\', '/').toLowerCase().trim();
-    return normalized.startsWith('resources/');
-  }
+  /// Encrypted path check uses manifest.json when present (see [isEncryptedPath] in book_manifest.dart); else paths under resources/ are encrypted.
+
+  /// Max size (bytes) of the file used for pre-load verification on Android (avoid main-isolate OOM).
+  static const int _kVerifyMaxFileBytesAndroid = 128 * 1024; // 128 KB
 
   /// Verifies decryption works before loading (decrypts one file under resources/; only resources folder is encrypted).
+  /// On Android uses only a small file (<= 128 KB) to avoid "Exhausted heap space" on main isolate.
   Future<bool> _verifyDecryptionBeforeLoad({
     required Directory bookDirectory,
     required String indexHtmlPath,
@@ -756,6 +1058,10 @@ class _ReadingScreenState extends State<ReadingScreen> {
       File? firstUnderResources;
       await for (final entity in resourcesDir.list(recursive: true)) {
         if (entity is File) {
+          if (Platform.isAndroid) {
+            final len = await entity.length();
+            if (len > _kVerifyMaxFileBytesAndroid) continue; // skip large files on Android
+          }
           firstUnderResources = entity;
           break;
         }
@@ -953,12 +1259,33 @@ class _ReadingScreenState extends State<ReadingScreen> {
   }
 
   /// Starts a local HTTP server to serve book files.
-  /// If [contentKey] is set, each file is decrypted on-the-fly when served (no decrypted data persisted).
+  /// On Android the server runs in a separate isolate so the main isolate never holds decrypted file bytes (avoids "Exhausted heap space").
   Future<void> _startLocalServer(Directory bookDirectory, {Uint8List? contentKey}) async {
-    // Stop any existing server first
     await _stopLocalServer();
-    
-    // Try to find an available port starting from 8080
+
+    if (Platform.isAndroid) {
+      _serverPort = 8080;
+      final completer = Completer<void>();
+      final receivePort = ReceivePort();
+      receivePort.listen((message) {
+        if (message is SendPort) {
+          _serverIsolateSendPort = message;
+          _serverIsolateSendPort!.send([bookDirectory.path, contentKey, _serverPort]);
+        } else if (message == 'ready') {
+          if (!completer.isCompleted) completer.complete();
+        } else if (message is List && message.length >= 2 && message[0] == 'error') {
+          if (!completer.isCompleted) completer.completeError(Exception(message[1].toString()));
+        }
+      });
+      _serverIsolate = await Isolate.spawn(isolate_runner.bookServerIsolateEntry, receivePort.sendPort);
+      try {
+        await completer.future;
+      } finally {
+        receivePort.close();
+      }
+      return;
+    }
+
     for (int port = 8080; port < 8090; port++) {
       try {
         _serverPort = port;
@@ -971,9 +1298,14 @@ class _ReadingScreenState extends State<ReadingScreen> {
         continue;
       }
     }
-    
-    // Log book directory structure at startup (so we can see what paths exist for chapters/webp)
     await _logBookDirectoryStructure(bookDirectory);
+
+    // Use manifest.json for encrypted paths when present; else fall back to resources/
+    final serverEncryptedPaths = await loadEncryptedPathsFromManifest(bookDirectory.path);
+
+    String? cachedDecryptedPath;
+    Uint8List? cachedDecryptedBytes;
+    final Set<String> first206VideoLogged = <String>{};
 
     // Handle incoming requests
     _localServer!.listen((HttpRequest request) async {
@@ -1029,50 +1361,222 @@ class _ReadingScreenState extends State<ReadingScreen> {
             ext = '.${requestedPath.split('.').last.toLowerCase()}';
           }
           final String mimeStr = _mimeTypeForExtension(ext);
-          // Use resolved path for AAD when file was found via fallback (so decrypt matches encryption path).
           final pathForDecrypt = path.relative(filePath, from: bookDirectory.path).replaceAll('\\', '/');
-
-          var fileBytes = await file.readAsBytes();
-          var servedNote = 'ok';
-          // Only resources/ folder content is encrypted; serve everything else as plain
-          if (contentKey != null && _isEncryptedPath(pathForDecrypt)) {
-            try {
-              fileBytes = await BookDecryptionService.decryptFileBytesWithOptionalAad(
-                encryptedBytes: fileBytes,
-                contentKey: contentKey,
-                requestedPath: pathForDecrypt,
-              );
-              servedNote = 'decrypted';
-              _logDecryptionOnPage(true, requestedPath, sizeBytes: fileBytes.length);
-              await _debugSaveDecryptedPage(requestedPath, fileBytes);
-            } catch (e) {
-              _logDecryptionOnPage(false, requestedPath, error: e);
-              BookDecryptionService.logDecryptFailure(
-                requestedPath: requestedPath,
-                fileSizeBytes: fileBytes.length,
-                error: e,
-              );
-              final isMacError = e.toString().toLowerCase().contains('mac') ||
-                  e.toString().toLowerCase().contains('secretboxauthentication');
-              if (!isMacError) {
-                _logServerRequest(requestedPath, 500, 'decrypt failed');
-                request.response
-                  ..statusCode = HttpStatus.internalServerError
-                  ..headers.set('Content-Type', 'text/plain; charset=utf-8')
-                  ..write('Decryption failed: $e')
-                  ..close();
-                return;
-              }
-              servedNote = 'plain (decrypt failed)';
+          final predecryptedPath = _predecryptedVideoPath(bookDirectory.path, pathForDecrypt);
+          var servedFromPredecrypted = false;
+          if (_isVideoPath(pathForDecrypt)) {
+            final pre = File(predecryptedPath);
+            if (await pre.exists()) {
+              file = pre;
+              filePath = predecryptedPath;
+              servedFromPredecrypted = true;
             }
           }
-          _logServerRequest(requestedPath, 200, servedNote);
-          final response = request.response;
-          response.headers.set('Content-Type', mimeStr);
-          response.headers.contentType = ContentType.parse(mimeStr);
-          response.headers.contentLength = fileBytes.length;
-          response.add(fileBytes);
-          response.close();
+          final isEncrypted = contentKey != null &&
+              !servedFromPredecrypted &&
+              isEncryptedPath(pathForDecrypt, serverEncryptedPaths);
+          final fileLength = await file.length();
+          final range = _parseByteRange(request.headers.value(HttpHeaders.rangeHeader), fileLength);
+
+          // Android: reject encrypted files that exceed per-path max size before reading (avoid OOM).
+          final maxAllowed = BookDecryptionService.maxDecryptBytesForPath(pathForDecrypt);
+          if (isEncrypted && fileLength > maxAllowed) {
+            _logServerRequest(requestedPath, 413, 'file too large for decrypt (max $maxAllowed)');
+            BookDecryptionService.logDecryptBlocked(
+              requestedPath: pathForDecrypt,
+              fileSizeBytes: fileLength,
+              maxAllowedBytes: maxAllowed,
+            );
+            request.response
+              ..statusCode = 413
+              ..headers.set('Content-Type', 'text/plain; charset=utf-8')
+              ..write('File too large to decrypt on this device.')
+              ..close();
+            return;
+          }
+
+          if (isEncrypted) {
+            if (_isVideoPath(pathForDecrypt)) {
+              final cachedVideoFile = File(_predecryptedVideoPath(bookDirectory.path, pathForDecrypt));
+              if (!await cachedVideoFile.exists()) {
+                BookDecryptionService.logServerEvent(
+                  message: 'video decrypt start',
+                  requestedPath: pathForDecrypt,
+                );
+                final encryptedBytes = await file.readAsBytes();
+                Uint8List decryptedVideoBytes;
+                try {
+                  decryptedVideoBytes = await BookDecryptionService.decryptFileBytesWithOptionalAad(
+                    encryptedBytes: encryptedBytes,
+                    contentKey: contentKey!,
+                    requestedPath: pathForDecrypt,
+                  );
+                } catch (e) {
+                  final isMacError = e.toString().toLowerCase().contains('mac') ||
+                      e.toString().toLowerCase().contains('secretboxauthentication');
+                  if (!isMacError) {
+                    _logServerRequest(requestedPath, 500, 'video decrypt failed');
+                    request.response
+                      ..statusCode = HttpStatus.internalServerError
+                      ..headers.set('Content-Type', 'text/plain; charset=utf-8')
+                      ..write('Decryption failed: $e')
+                      ..close();
+                    return;
+                  }
+                  decryptedVideoBytes = encryptedBytes;
+                }
+                await cachedVideoFile.parent.create(recursive: true);
+                await cachedVideoFile.writeAsBytes(decryptedVideoBytes, flush: false);
+                BookDecryptionService.logServerEvent(
+                  message: 'video decrypt end',
+                  requestedPath: pathForDecrypt,
+                  sizeBytes: decryptedVideoBytes.length,
+                );
+              }
+
+              final cachedLength = await cachedVideoFile.length();
+              final videoRange = _parseByteRange(
+                request.headers.value(HttpHeaders.rangeHeader),
+                cachedLength,
+              );
+              final response = request.response;
+              response
+                ..headers.set('Content-Type', mimeStr)
+                ..headers.contentType = ContentType.parse(mimeStr)
+                ..headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+              if (videoRange != null) {
+                final start = videoRange.start;
+                final end = videoRange.end;
+                if (!first206VideoLogged.contains(pathForDecrypt)) {
+                  first206VideoLogged.add(pathForDecrypt);
+                  BookDecryptionService.logServerEvent(
+                    message: 'video first 206 response sent',
+                    requestedPath: pathForDecrypt,
+                    details: 'range=$start-$end',
+                  );
+                }
+                _logServerRequest(requestedPath, 206, 'video cached partial');
+                response
+                  ..statusCode = HttpStatus.partialContent
+                  ..headers.set(HttpHeaders.contentRangeHeader, 'bytes $start-$end/$cachedLength')
+                  ..headers.contentLength = end - start + 1;
+                await for (final chunk in cachedVideoFile.openRead(start, end + 1)) {
+                  response.add(chunk);
+                }
+                await response.close();
+              } else {
+                _logServerRequest(requestedPath, 200, 'video cached');
+                response.headers.contentLength = cachedLength;
+                await for (final chunk in cachedVideoFile.openRead()) {
+                  response.add(chunk);
+                }
+                await response.close();
+              }
+              return;
+            }
+
+            Uint8List? toServe;
+            var servedPlainFallback = false;
+            if (cachedDecryptedPath == pathForDecrypt && cachedDecryptedBytes != null) {
+              toServe = cachedDecryptedBytes!;
+            } else {
+              // Encrypted: read → decrypt → serve (single buffer at a time for Android).
+              final encryptedBytes = await file.readAsBytes();
+              try {
+                toServe = await BookDecryptionService.decryptFileBytesWithOptionalAad(
+                  encryptedBytes: encryptedBytes,
+                  contentKey: contentKey!,
+                  requestedPath: pathForDecrypt,
+                );
+                _logDecryptionOnPage(true, requestedPath, sizeBytes: toServe.length);
+                if (!Platform.isAndroid) await _debugSaveDecryptedPage(requestedPath, toServe);
+                // Cache decrypted bytes for repeated range requests (especially mp4 playback).
+                final lower = pathForDecrypt.toLowerCase();
+                final shouldCache = lower.endsWith('.mp4') ||
+                    lower.endsWith('.webm') ||
+                    lower.endsWith('.css') ||
+                    lower.endsWith('.js') ||
+                    lower.endsWith('.html');
+                if (shouldCache && toServe.length <= 8 * 1024 * 1024) {
+                  cachedDecryptedPath = pathForDecrypt;
+                  cachedDecryptedBytes = toServe;
+                }
+              } catch (e) {
+                _logDecryptionOnPage(false, requestedPath, error: e);
+                BookDecryptionService.logDecryptFailure(
+                  requestedPath: requestedPath,
+                  fileSizeBytes: encryptedBytes.length,
+                  error: e,
+                );
+                final isMacError = e.toString().toLowerCase().contains('mac') ||
+                    e.toString().toLowerCase().contains('secretboxauthentication');
+                if (!isMacError) {
+                  _logServerRequest(requestedPath, 500, 'decrypt failed');
+                  request.response
+                    ..statusCode = HttpStatus.internalServerError
+                    ..headers.set('Content-Type', 'text/plain; charset=utf-8')
+                    ..write('Decryption failed: $e')
+                    ..close();
+                  return;
+                }
+                toServe = encryptedBytes;
+                servedPlainFallback = true;
+              }
+            }
+            final response = request.response;
+            response.headers.set('Content-Type', mimeStr);
+            response.headers.contentType = ContentType.parse(mimeStr);
+            response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+            final contentLength = toServe.length;
+            final decryptedRange = _parseByteRange(
+              request.headers.value(HttpHeaders.rangeHeader),
+              contentLength,
+            );
+            if (decryptedRange != null) {
+              final start = decryptedRange.start;
+              final end = decryptedRange.end;
+              final partial = toServe.sublist(start, end + 1);
+              _logServerRequest(requestedPath, 206, servedPlainFallback ? 'plain partial' : 'decrypted partial');
+              response
+                ..statusCode = HttpStatus.partialContent
+                ..headers.set(HttpHeaders.contentRangeHeader, 'bytes $start-$end/$contentLength')
+                ..headers.contentLength = partial.length
+                ..add(partial);
+              await response.close();
+            } else {
+              _logServerRequest(requestedPath, 200, servedPlainFallback ? 'plain (decrypt failed)' : 'decrypted');
+              response
+                ..headers.contentLength = contentLength
+                ..add(toServe);
+              await response.close();
+            }
+          } else {
+            // Plain file: stream in chunks to avoid loading entire file into memory (Android OOM).
+            final response = request.response;
+            response.headers.set('Content-Type', mimeStr);
+            response.headers.contentType = ContentType.parse(mimeStr);
+            response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+            if (range != null) {
+              final start = range.start;
+              final end = range.end;
+              _logServerRequest(requestedPath, 206, 'partial');
+              response
+                ..statusCode = HttpStatus.partialContent
+                ..headers.set(HttpHeaders.contentRangeHeader, 'bytes $start-$end/$fileLength')
+                ..headers.contentLength = end - start + 1;
+              await for (final chunk in file.openRead(start, end + 1)) {
+                response.add(chunk);
+              }
+              await response.close();
+            } else {
+              _logServerRequest(requestedPath, 200, 'ok');
+              response.headers.contentLength = fileLength;
+              await for (final chunk in file.openRead()) {
+                response.add(chunk);
+              }
+              await response.close();
+            }
+          }
         }
       } catch (e) {
         request.response
@@ -1083,6 +1587,55 @@ class _ReadingScreenState extends State<ReadingScreen> {
       }
     });
     
+  }
+
+  ({int start, int end})? _parseByteRange(String? header, int totalLength) {
+    if (header == null || !header.startsWith('bytes=')) return null;
+    final value = header.substring(6).trim();
+    if (value.isEmpty || value.contains(',')) return null;
+    final parts = value.split('-');
+    if (parts.length != 2) return null;
+    final startStr = parts[0].trim();
+    final endStr = parts[1].trim();
+    if (startStr.isEmpty) {
+      final suffix = int.tryParse(endStr);
+      if (suffix == null || suffix <= 0) return null;
+      final start = (totalLength - suffix).clamp(0, totalLength - 1);
+      return (start: start, end: totalLength - 1);
+    }
+    final start = int.tryParse(startStr);
+    if (start == null || start < 0 || start >= totalLength) return null;
+    final end = endStr.isEmpty ? totalLength - 1 : (int.tryParse(endStr) ?? totalLength - 1);
+    if (end < start) return null;
+    final normalizedEnd = end >= totalLength ? totalLength - 1 : end;
+    return (start: start, end: normalizedEnd);
+  }
+
+  static bool _isVideoPath(String relativePath) {
+    final lower = relativePath.toLowerCase();
+    return lower.endsWith('.mp4') || lower.endsWith('.webm');
+  }
+
+  static String _predecryptedVideoPath(String bookDirPath, String relativePath) {
+    return path.join(bookDirPath, '.decrypted_video_cache', relativePath);
+  }
+
+  Future<void> _predecryptVideosInBackground(Directory bookDirectory, Uint8List contentKey) async {
+    try {
+      final encryptedPaths = await loadEncryptedPathsFromManifest(bookDirectory.path);
+      final outDirPath = path.join(bookDirectory.path, '.decrypted_video_cache');
+      final params = VideoPredecryptParams(
+        bookDirPath: bookDirectory.path,
+        outputDirPath: outDirPath,
+        contentKey: contentKey,
+        encryptedPathsLower: encryptedPaths?.toList(),
+      );
+      unawaited(
+        compute(predecryptVideoFilesBackground, params).catchError((_) => 0),
+      );
+    } catch (_) {
+      // best effort
+    }
   }
 
   // ignore: unused_element
@@ -1221,6 +1774,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
                 ),
               )
             else if (_controller != null)
+              // Reuse same WebView instance (controller created once in initState); do not recreate on build().
               _useTvCursor
                   ? Shortcuts(
                       shortcuts: <LogicalKeySet, Intent>{

@@ -13,6 +13,7 @@ import '../services/api_service.dart';
 import '../services/database_service.dart';
 import '../utils/permission_helper.dart';
 import '../utils/connectivity_helper.dart';
+import '../utils/dummy_data.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -71,7 +72,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _licenseController.text = prefs.getString(_kLicenseNumber) ?? '';
+      _licenseController.text = prefs.getString(_kLicenseNumber) ?? DummyData.dummyLicenseNumber;
       _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
       _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';

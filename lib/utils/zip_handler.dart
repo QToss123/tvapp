@@ -42,8 +42,7 @@ class ZipHandler {
     return extractZipToDir(zipFilePath, extractDir.path);
   }
 
-  /// Finds index.html in the extracted directory
-  /// Returns the full path to index.html or null if not found
+  /// Finds the main HTML entry (index.html or canvas.html for flipbooks) in the extracted directory.
   static Future<String?> findIndexHtml(String directoryPath) async {
     try {
       final dir = Directory(directoryPath);
@@ -51,10 +50,10 @@ class ZipHandler {
         return null;
       }
 
-      // First, check if index.html is directly in the root
-      final rootIndexHtml = File(path.join(directoryPath, 'index.html'));
-      if (await rootIndexHtml.exists()) {
-        return rootIndexHtml.path;
+      // Prefer index.html in root, then canvas.html (flipbook), then recursive search
+      for (final name in ['index.html', 'canvas.html']) {
+        final f = File(path.join(directoryPath, name));
+        if (await f.exists()) return f.path;
       }
 
       // Search recursively for index.html
@@ -133,6 +132,7 @@ class ZipHandler {
     }
   }
 
+  /// Extract dir is named like the zip without .zip (e.g. book_17c4ba3312ac44d4_encrypted).
   static Future<Directory> _getExtractDir(String zipFilePath) async {
     final tempDir = await getTemporaryDirectory();
     return Directory(
