@@ -310,11 +310,11 @@ class BookDecryptionService {
 
   /// Higher cap for encrypted video assets (mp4/webm) which are usually larger than pages.
   static int get maxPerVideoDecryptBytes =>
-      Platform.isAndroid ? 5 * 1024 * 1024 : 20 * 1024 * 1024; // 5 MB on Android, 20 MB elsewhere
+      Platform.isAndroid ? 30 * 1024 * 1024 : 30 * 1024 * 1024; // 30 MB
 
   /// Slightly higher cap for animation videos folder, which often contains bigger MP4 assets.
   static int get maxPerAnimationVideoDecryptBytes =>
-      Platform.isAndroid ? 8 * 1024 * 1024 : 24 * 1024 * 1024; // 8 MB on Android, 24 MB elsewhere
+      Platform.isAndroid ? 30 * 1024 * 1024 : 30 * 1024 * 1024; // 30 MB
 
   /// Per-path decrypt cap: videos get a higher cap than other encrypted assets.
   static int maxDecryptBytesForPath(String requestedPath) {
