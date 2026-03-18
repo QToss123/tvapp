@@ -3,6 +3,12 @@ include :
     ref: master
     file: app-template.gitlab-ci.yml
 
+variables:
+  DEV_BACKEND_URL: "https://licenses.dbk.dev.burlingtonenglish.in/"
+  DEV_BOOK_KEY: $DEV_BOOK_CI_KEY
+  PROD_BACKEND_URL: "https://licenses.dbk.burlingtonenglish.in/"
+  PROD_BOOK_KEY: $PROD_BOOK_CI_KEY
+
 stages:
   - package-dev
   - release-dev
