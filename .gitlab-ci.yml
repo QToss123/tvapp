@@ -14,14 +14,15 @@ package-linux-dev:
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.linux'
+    DOCKER_BUILD_OPTIONS: '--build-arg '
   when: manual  
-
 
 package-android-dev:
   stage: package-dev
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.android'
+    DOCKER_BUILD_OPTIONS: '--build-arg '
   when: manual  
 
 package-windows-dev:
@@ -29,6 +30,7 @@ package-windows-dev:
   extends: .package.windows
   variables: 
     DOCKER_FILE: 'Dockerfile.windows'
+    DOCKER_BUILD_OPTIONS: '--build-arg '
   when: manual  
 
 release-linux-dev:
@@ -49,19 +51,21 @@ release-windows-dev:
   stage: release-dev
   extends: .release  
 
+
 package-linux-prod:
   stage: package-prod
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.linux'
+    DOCKER_BUILD_OPTIONS: '--build-arg '
   when: manual  
-
 
 package-android-prod:
   stage: package-prod
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.android'
+    DOCKER_BUILD_OPTIONS: '--build-arg '
   when: manual  
 
 package-windows-prod:
@@ -69,6 +73,7 @@ package-windows-prod:
   extends: .package.windows
   variables: 
     DOCKER_FILE: 'Dockerfile.windows'
+    DOCKER_BUILD_OPTIONS: '--build-arg '
   when: manual  
 
 release-linux-prod:
