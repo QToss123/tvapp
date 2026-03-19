@@ -12,10 +12,8 @@ import 'package:tv_app_books/utils/device_id_helper.dart';
 /// API Service for handling license validation and other API calls
 class ApiService {
 
-  //static const String baseUrl = 'https://licenses.dbk.burlingtonenglish.in/api/v1';
-
-  
-  static const String baseUrl = 'https://licenses.dbk.dev.burlingtonenglish.in/api/v1';
+  //static const String baseUrl = 'https://licenses.dbk.dev.burlingtonenglish.in/api/v1';
+  static const String baseUrl = 'https://licenses.dbk.burlingtonenglish.in/api/v1';
   static const String validateLicenseEndpoint = '$baseUrl/license/validate';
   static const String activateLicenseEndpoint = '$baseUrl/license/activate';
   static const String productListEndpoint = '$baseUrl/product/list';

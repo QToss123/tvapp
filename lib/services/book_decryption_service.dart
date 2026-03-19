@@ -70,7 +70,9 @@ class BookDecryptionService {
   static const int _maxDecryptFileSizeBytes = 150 * 1024 * 1024; // 150 MB
 
   static const String _masterKeyB64 =
-      'p4wZbM9kqFv6QzQhM0xA2G9Pz0x0QnH2xX3B6YkJQzE=';
+      'qkvIPRQyvmiM5V7P4NUbQqVyKWnkisvGM2DKd7ZcGXU=';
+
+      
 
   static const _nonceLength = 12;
   static const _macLength = 16; // GCM 128-bit tag
