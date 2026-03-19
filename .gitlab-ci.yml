@@ -10,92 +10,90 @@ variables:
   PROD_BOOK_KEY: $PROD_BOOK_CI_KEY
 
 stages:
-  - package-dev
-  - release-dev
-  - package-prod
-  - release-prod
+  - package
+  - release
 
 package-linux-dev:
-  stage: package-dev
+  stage: package
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.linux'
-    DOCKER_BUILD_OPTIONS: '--build-arg '
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$DEV_BACKEND_URL --build-arg BOOK_KEY=$DEV_BOOK_KEY'
   when: manual  
 
 package-android-dev:
-  stage: package-dev
+  stage: package
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.android'
-    DOCKER_BUILD_OPTIONS: '--build-arg '
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$DEV_BACKEND_URL --build-arg BOOK_KEY=$DEV_BOOK_KEY'
   when: manual  
 
 package-windows-dev:
-  stage: package-dev
+  stage: package
   extends: .package.windows
   variables: 
     DOCKER_FILE: 'Dockerfile.windows'
-    DOCKER_BUILD_OPTIONS: '--build-arg '
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$DEV_BACKEND_URL --build-arg BOOK_KEY=$DEV_BOOK_KEY'
   when: manual  
 
 release-linux-dev:
   needs:
     - package-linux-dev
-  stage: release-dev
+  stage: package
   extends: .release
 
 release-android-dev:
   needs:
     - package-android-dev
-  stage: release-dev
+  stage: package
   extends: .release
 
 release-windows-dev:
   needs:
     - package-windows-dev
-  stage: release-dev
+  stage: package
   extends: .release  
 
 
 package-linux-prod:
-  stage: package-prod
+  stage: package
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.linux'
-    DOCKER_BUILD_OPTIONS: '--build-arg '
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$PROD_BACKEND_URL --build-arg BOOK_KEY=$PROD_BOOK_KEY'
   when: manual  
 
 package-android-prod:
-  stage: package-prod
+  stage: package
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.android'
-    DOCKER_BUILD_OPTIONS: '--build-arg '
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$PROD_BACKEND_URL --build-arg BOOK_KEY=$PROD_BOOK_KEY'
   when: manual  
 
 package-windows-prod:
-  stage: package-prod
+  stage: package
   extends: .package.windows
   variables: 
     DOCKER_FILE: 'Dockerfile.windows'
-    DOCKER_BUILD_OPTIONS: '--build-arg '
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$PROD_BACKEND_URL --build-arg BOOK_KEY=$PROD_BOOK_KEY'
   when: manual  
 
 release-linux-prod:
   needs:
     - package-linux-prod
-  stage: release-prod
+  stage: package
   extends: .release
 
 release-android-prod:
   needs:
     - package-android-prod
-  stage: release-prod
+  stage: package
   extends: .release
 
 release-windows-prod:
   needs:
     - package-windows-prod
-  stage: release-prod
+  stage: package
   extends: .release    
