@@ -6,8 +6,10 @@ include :
 variables:
   DEV_BACKEND_URL: "https://licenses.dbk.dev.burlingtonenglish.in/"
   DEV_BOOK_KEY: $DEV_BOOK_CI_KEY
+  DEV_PACKAGE_SUFFIX: "_Dev"
   PROD_BACKEND_URL: "https://licenses.dbk.burlingtonenglish.in/"
   PROD_BOOK_KEY: $PROD_BOOK_CI_KEY
+  PROD_PACKAGE_SUFFIX: "_Prod"
 
 stages:
   - package
@@ -18,7 +20,7 @@ package-linux-dev:
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.linux'
-    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$DEV_BACKEND_URL --build-arg BOOK_KEY=$DEV_BOOK_KEY'
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$DEV_BACKEND_URL --build-arg BOOK_KEY=$DEV_BOOK_KEY --build-arg PACKAGE_SUFFIX=$DEV_PACKAGE_SUFFIX'
   when: manual  
 
 package-android-dev:
@@ -26,7 +28,7 @@ package-android-dev:
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.android'
-    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$DEV_BACKEND_URL --build-arg BOOK_KEY=$DEV_BOOK_KEY'
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$DEV_BACKEND_URL --build-arg BOOK_KEY=$DEV_BOOK_KEY --build-arg PACKAGE_SUFFIX=$DEV_PACKAGE_SUFFIX'
   when: manual  
 
 package-windows-dev:
@@ -34,7 +36,7 @@ package-windows-dev:
   extends: .package.windows
   variables: 
     DOCKER_FILE: 'Dockerfile.windows'
-    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$DEV_BACKEND_URL --build-arg BOOK_KEY=$DEV_BOOK_KEY'
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$DEV_BACKEND_URL --build-arg BOOK_KEY=$DEV_BOOK_KEY --build-arg PACKAGE_SUFFIX=$DEV_PACKAGE_SUFFIX'
   when: manual  
 
 release-linux-dev:
@@ -61,7 +63,7 @@ package-linux-prod:
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.linux'
-    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$PROD_BACKEND_URL --build-arg BOOK_KEY=$PROD_BOOK_KEY'
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$PROD_BACKEND_URL --build-arg BOOK_KEY=$PROD_BOOK_KEY --build-arg PACKAGE_SUFFIX=$PROD_PACKAGE_SUFFIX'
   when: manual  
 
 package-android-prod:
@@ -69,7 +71,7 @@ package-android-prod:
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.android'
-    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$PROD_BACKEND_URL --build-arg BOOK_KEY=$PROD_BOOK_KEY'
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$PROD_BACKEND_URL --build-arg BOOK_KEY=$PROD_BOOK_KEY --build-arg PACKAGE_SUFFIX=$PROD_PACKAGE_SUFFIX'
   when: manual  
 
 package-windows-prod:
@@ -77,7 +79,7 @@ package-windows-prod:
   extends: .package.windows
   variables: 
     DOCKER_FILE: 'Dockerfile.windows'
-    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$PROD_BACKEND_URL --build-arg BOOK_KEY=$PROD_BOOK_KEY'
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$PROD_BACKEND_URL --build-arg BOOK_KEY=$PROD_BOOK_KEY --build-arg PACKAGE_SUFFIX=$PROD_PACKAGE_SUFFIX'
   when: manual  
 
 release-linux-prod:
