@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
@@ -573,7 +574,22 @@ class ApiService {
     String? responseBody,
     Object? error,
   }) async {
-    // Logging is disabled in the final Windows build.
-    return;
+    final buffer = StringBuffer()
+      ..writeln('[ApiService] $method $url');
+
+    if (requestBody != null) {
+      buffer.writeln('[ApiService] Request: ${jsonEncode(requestBody)}');
+    }
+    if (statusCode != null) {
+      buffer.writeln('[ApiService] Status: $statusCode');
+    }
+    if (responseBody != null && responseBody.isNotEmpty) {
+      buffer.writeln('[ApiService] Response: $responseBody');
+    }
+    if (error != null) {
+      buffer.writeln('[ApiService] Error: $error');
+    }
+
+    debugPrint(buffer.toString());
   }
 }
