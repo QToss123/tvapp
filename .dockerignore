@@ -28,11 +28,11 @@ Thumbs.db
 Dockerfile*
 .dockerignore
 
-# Android / iOS (not needed for Windows build)
-android/
+# iOS / macOS (not used by these Dockerfiles)
 ios/
-linux/
 macos/
+
+# Note: android/ and linux/ must NOT be ignored — Dockerfile.android and Dockerfile.linux need them.
 
 # Tests and coverage
 coverage/
