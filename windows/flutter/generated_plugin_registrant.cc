@@ -8,7 +8,6 @@
 
 #include <fullscreen_window/fullscreen_window_plugin_c_api.h>
 #include <permission_handler_windows/permission_handler_windows_plugin.h>
-#include <url_launcher_windows/url_launcher_windows.h>
 #include <webview_win_floating/webview_win_floating_plugin_c_api.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
@@ -16,8 +15,6 @@ void RegisterPlugins(flutter::PluginRegistry* registry) {
       registry->GetRegistrarForPlugin("FullscreenWindowPluginCApi"));
   PermissionHandlerWindowsPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("PermissionHandlerWindowsPlugin"));
-  UrlLauncherWindowsRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("UrlLauncherWindows"));
   WebviewWinFloatingPluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("WebviewWinFloatingPluginCApi"));
 }

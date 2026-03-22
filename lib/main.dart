@@ -29,8 +29,6 @@ void _deferredInit() {
   if (Platform.isWindows || Platform.isLinux) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
-  }
-  if (Platform.isWindows) {
     WindowsWebViewPlatform.registerWith();
   }
   try {

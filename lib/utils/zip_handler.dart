@@ -42,8 +42,7 @@ class ZipHandler {
     return extractZipToDir(zipFilePath, extractDir.path);
   }
 
-  /// Finds index.html in the extracted directory
-  /// Returns the full path to index.html or null if not found
+  /// Finds the main HTML entry (index.html or canvas.html for flipbooks) in the extracted directory.
   static Future<String?> findIndexHtml(String directoryPath) async {
     try {
       final dir = Directory(directoryPath);
@@ -51,10 +50,10 @@ class ZipHandler {
         return null;
       }
 
-      // First, check if index.html is directly in the root
-      final rootIndexHtml = File(path.join(directoryPath, 'index.html'));
-      if (await rootIndexHtml.exists()) {
-        return rootIndexHtml.path;
+      // Prefer index.html in root, then canvas.html (flipbook), then recursive search
+      for (final name in ['index.html', 'canvas.html']) {
+        final f = File(path.join(directoryPath, name));
+        if (await f.exists()) return f.path;
       }
 
       // Search recursively for index.html
@@ -73,29 +72,23 @@ class ZipHandler {
   /// Same as [processBookFile] but runs extraction in background isolate to avoid ANR on TV.
   static Future<({String path, bool wasExtracted})> processBookFileOffMain(String filePath) async {
     if (!isZipFile(filePath)) {
-      debugPrint('[Unzip] not a ZIP file, using as-is: $filePath');
       return (path: filePath, wasExtracted: false);
     }
     final extractDir = await _getExtractDir(filePath);
     if (await extractDir.exists()) {
       final existingIndex = await findIndexHtml(extractDir.path);
       if (existingIndex != null) {
-        debugPrint('[Unzip] reusing existing extracted dir, index: $existingIndex');
         return (path: existingIndex, wasExtracted: false);
       }
     }
-    debugPrint('[Unzip] extracting ZIP: $filePath -> ${extractDir.path}');
     final extractedPath = await compute(
       extractZipToDirBackground,
       (filePath, extractDir.path),
     );
     if (extractedPath == null) {
-      debugPrint('[Unzip] extract failed: $filePath');
       throw Exception('Failed to extract ZIP file');
     }
-    debugPrint('[Unzip] extract done: $extractedPath');
-    // Find index.html in background so large extracted dirs don't block main thread (big books)
-    final indexHtmlPath = await compute(findIndexHtmlInDirBackground, extractedPath);
+    final indexHtmlPath = await findIndexHtml(extractedPath);
     if (indexHtmlPath != null) {
       return (path: indexHtmlPath, wasExtracted: true);
     }
@@ -139,6 +132,7 @@ class ZipHandler {
     }
   }
 
+  /// Extract dir is named like the zip without .zip (e.g. book_17c4ba3312ac44d4_encrypted).
   static Future<Directory> _getExtractDir(String zipFilePath) async {
     final tempDir = await getTemporaryDirectory();
     return Directory(
@@ -149,27 +143,15 @@ class ZipHandler {
       ),
     );
   }
+
+  /// Returns the extract directory path for a zip (for cleanup or unzip-first flow).
+  static Future<String> getExtractDirPath(String zipFilePath) async {
+    final dir = await _getExtractDir(zipFilePath);
+    return dir.path;
+  }
 }
 
 /// Top-level for compute(). Extracts zip to dir; returns extracted path or null.
 Future<String?> extractZipToDirBackground((String zipPath, String extractDirPath) params) async {
   return ZipHandler.extractZipToDir(params.$1, params.$2);
-}
-
-/// Top-level for compute(). Finds index.html in dir; avoids blocking main thread on large books.
-Future<String?> findIndexHtmlInDirBackground(String directoryPath) async {
-  try {
-    final dir = Directory(directoryPath);
-    if (!await dir.exists()) return null;
-    final rootIndexHtml = File(path.join(directoryPath, 'index.html'));
-    if (await rootIndexHtml.exists()) return rootIndexHtml.path;
-    await for (final entity in dir.list(recursive: true)) {
-      if (entity is File && path.basename(entity.path).toLowerCase() == 'index.html') {
-        return entity.path;
-      }
-    }
-    return null;
-  } catch (e) {
-    return null;
-  }
 }

@@ -464,11 +464,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: const Text('WebBooks'),
-        ),
+        title: const Text('WebBooks'),
         actions: [
           IconButton(
             tooltip: _hasInternet ? 'Settings' : 'Internet connection required',

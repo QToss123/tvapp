@@ -5,8 +5,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  # Dart 3.5+ for Docker/CI (Flutter 3.24.x); 3.10+ preferred when available
-  sdk: ">=3.5.0 <4.0.0"
+  sdk: ">=3.10.0 <4.0.0"
 
 dependencies:
   flutter:
@@ -30,13 +29,11 @@ dependencies:
   cached_network_image: ^3.3.1
   flutter_cache_manager: ^3.3.1
   uuid: ^4.2.1
-  url_launcher: ^6.2.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  # 5.x for Dart 3.5 (Docker/CI); 6.x requires Dart ^3.8
-  flutter_lints: ^5.0.0
+  flutter_lints: ^6.0.0
   inno_bundle: ^0.11.2
   flutter_launcher_icons: ^0.14.4
 

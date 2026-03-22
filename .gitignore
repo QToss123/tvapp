@@ -42,7 +42,9 @@ app.*.map.json
 # Android Studio / Gradle build artifacts (avoid pushing large APKs and build outputs)
 /android/app/build/
 /android/build/
+build/app-release.apk
 *.apk
 *.aab
 *.ap_
 *.dex
+

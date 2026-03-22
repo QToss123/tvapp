@@ -87,7 +87,6 @@ Future<DecryptResult> decryptBookFileIfNeeded({
   // Check if file already decrypted (reuse _decrypted.zip)
   final alreadyDecrypted = await decryptedFile.exists();
   if (alreadyDecrypted) {
-    debugPrint('[Decrypt] reusing existing decrypted file: $decryptedPath');
     return DecryptResult(
       pathToUse: decryptedPath,
       wasDecrypted: true,
@@ -96,7 +95,6 @@ Future<DecryptResult> decryptBookFileIfNeeded({
     );
   }
 
-  debugPrint('[Decrypt] running decrypt (isolate): $encryptedFilePath -> $decryptedPath');
   // Run decryption in a background isolate so UI stays responsive (no "stuck" on TV)
   await compute(
     decryptOnDiskBackground,
@@ -114,7 +112,19 @@ Future<DecryptResult> decryptBookFileIfNeeded({
   if (!await verify.exists()) {
     throw Exception('Decryption completed but decrypted file not found: $decryptedPath');
   }
-  debugPrint('[Decrypt] decrypt completed: $decryptedPath');
+
+  // Debug: copy decrypted book to a folder next to the executable for inspection
+  if (kDebugMode) {
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent;
+      final debugDir = Directory(path.join(exeDir.path, 'debug_decrypted'));
+      if (!await debugDir.exists()) await debugDir.create(recursive: true);
+      final baseName = path.basename(decryptedPath);
+      final destPath = path.join(debugDir.path, baseName);
+      await verify.copy(destPath);
+    } catch (_) {}
+  }
+
   return DecryptResult(
     pathToUse: decryptedPath,
     wasDecrypted: true,

@@ -74,31 +74,28 @@ class _SplashScreenState extends State<SplashScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: Center(
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Image.asset(
-                'assets/app_icon.png',
-                width: 200,
-                fit: BoxFit.contain,
-                errorBuilder: (_, error, stackTrace) => const Text(
-                  'BurlingtonEnglish',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset(
+              'assets/app_icon.png',
+              width: 200,
+              fit: BoxFit.contain,
+              errorBuilder: (_, error, stackTrace) => const Text(
+                'BurlingtonEnglish',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
                 ),
               ),
-              const SizedBox(height: 24),
-              const Text(
-                'Loading...',
-                style: TextStyle(fontSize: 14, color: Colors.black54),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Loading...',
+              style: TextStyle(fontSize: 14, color: Colors.black54),
+            ),
+          ],
         ),
       ),
     );
