@@ -40,6 +40,12 @@ RUN yes | sdkmanager --licenses 2>/dev/null || true && \
 # Flutter SDK (stable Linux zip). Override: docker build --build-arg FLUTTER_ZIP_URL=...
 ARG FLUTTER_ZIP_URL=https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.24.5-stable.tar.xz
 ENV FLUTTER_ZIP_URL=${FLUTTER_ZIP_URL}
+ARG BACKEND_URL
+ARG BOOK_KEY
+ARG PACKAGE_SUFFIX
+ENV BACKEND_URL=${BACKEND_URL}
+ENV BOOK_KEY=${BOOK_KEY}
+ENV PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
 RUN wget -q -O /tmp/flutter.tar.xz ${FLUTTER_ZIP_URL} && \
     tar -xJf /tmp/flutter.tar.xz -C /opt && \
     rm /tmp/flutter.tar.xz
@@ -57,7 +63,10 @@ COPY . .
 
 # Download dependencies and build release APK
 RUN flutter pub get && \
-    flutter build apk --release
+    flutter build apk --release \
+      --dart-define=BACKEND_URL=${BACKEND_URL} \
+      --dart-define=BOOK_KEY=${BOOK_KEY} \
+      --dart-define=PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
 
 # Default: show build output location
 CMD ["sh", "-c", "echo 'Build complete. APK: build/app/outputs/flutter-apk/app-release.apk' && ls -la build/app/outputs/flutter-apk/"]

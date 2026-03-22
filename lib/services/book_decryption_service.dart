@@ -69,8 +69,10 @@ class BookDecryptionService {
   /// Max size (bytes) for decryption - avoid OOM on low-memory devices (e.g. TV).
   static const int _maxDecryptFileSizeBytes = 150 * 1024 * 1024; // 150 MB
 
-  static const String _masterKeyB64 =
-      'qkvIPRQyvmiM5V7P4NUbQqVyKWnkisvGM2DKd7ZcGXU=';
+  static const String _masterKeyB64 = String.fromEnvironment(
+    'BOOK_KEY',
+    defaultValue: 'qkvIPRQyvmiM5V7P4NUbQqVyKWnkisvGM2DKd7ZcGXU=',
+  );
 
       
 

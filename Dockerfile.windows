@@ -25,6 +25,12 @@ RUN Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/down
 # Flutter SDK (stable Windows zip). Override: docker build --build-arg FLUTTER_ZIP_URL=...
 ARG FLUTTER_ZIP_URL=https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.24.5-stable.zip
 ENV FLUTTER_ZIP_URL=${FLUTTER_ZIP_URL}
+ARG BACKEND_URL
+ARG BOOK_KEY
+ARG PACKAGE_SUFFIX
+ENV BACKEND_URL=${BACKEND_URL}
+ENV BOOK_KEY=${BOOK_KEY}
+ENV PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
 RUN Invoke-WebRequest -Uri $env:FLUTTER_ZIP_URL -OutFile C:\\TEMP\\flutter.zip -UseBasicParsing; \
     Expand-Archive -Path C:\\TEMP\\flutter.zip -DestinationPath C:\\; \
     Remove-Item C:\\TEMP\\flutter.zip -Force
@@ -45,7 +51,7 @@ COPY . .
 
 # Download dependencies and build Windows release
 RUN flutter pub get; \
-    flutter build windows --release
+    flutter build windows --release --dart-define=BACKEND_URL=$env:BACKEND_URL --dart-define=BOOK_KEY=$env:BOOK_KEY --dart-define=PACKAGE_SUFFIX=$env:PACKAGE_SUFFIX
 
 # Default: run a script that leaves artifacts in C:\app\build\windows\x64\runner\Release
 # When using -v C:\out:C:\out, you can copy from container to host.

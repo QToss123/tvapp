@@ -33,6 +33,12 @@
     # Install Flutter SDK
     # -------------------------------------------------------
     ARG FLUTTER_ZIP_URL=https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.24.5-stable.tar.xz
+    ARG BACKEND_URL
+    ARG BOOK_KEY
+    ARG PACKAGE_SUFFIX
+    ENV BACKEND_URL=${BACKEND_URL}
+    ENV BOOK_KEY=${BOOK_KEY}
+    ENV PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
     
     RUN wget -q -O flutter.tar.xz ${FLUTTER_ZIP_URL} && \
         tar -xJf flutter.tar.xz -C /opt && \
@@ -61,7 +67,10 @@ RUN git config --global --add safe.directory /opt/flutter && \
     # -------------------------------------------------------
     # Build Linux release
     # -------------------------------------------------------
-    RUN flutter build linux --release
+    RUN flutter build linux --release \
+        --dart-define=BACKEND_URL=${BACKEND_URL} \
+        --dart-define=BOOK_KEY=${BOOK_KEY} \
+        --dart-define=PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
     
     # -------------------------------------------------------
     # Export build to mounted volume (/out)
