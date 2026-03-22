@@ -589,11 +589,20 @@ class _ReadingScreenState extends State<ReadingScreen> {
           NavigationDelegate(
             onPageStarted: (String url) {
               if (mounted) setState(() {
-                _isLoading = true;
+                // Keep overlay for real loads; placeholder URLs should not flash loading state.
+                if (!_isPlaceholderWebViewUrl(url)) {
+                  _isLoading = true;
+                }
                 _error = null;
               });
             },
             onPageFinished: (String url) {
+              // Placeholder navigations must not clear the Flutter overlay: on Android the WebView
+              // often paints above Stack children, so users would otherwise see a white blank for the
+              // whole unzip/server phase (about:blank / data: "Opening book…" finish before the book URL).
+              if (_isPlaceholderWebViewUrl(url)) {
+                return;
+              }
               _linuxHttpFallbackUrl = null;
               if (mounted) setState(() { _isLoading = false; _loadingMessage = null; });
               _injectBookFixes();
@@ -689,6 +698,16 @@ class _ReadingScreenState extends State<ReadingScreen> {
     if (url.isEmpty) return false;
     if (Platform.isWindows && url.length >= 2 && url[1] == ':') return true;
     if (url.startsWith('/') && !url.startsWith('//')) return true;
+    return false;
+  }
+
+  /// Blank / interim pages while the ZIP is extracted and the local server starts.
+  /// [NavigationDelegate] must not clear [_isLoading] for these or the overlay disappears too early.
+  static bool _isPlaceholderWebViewUrl(String url) {
+    if (url.isEmpty) return true;
+    final u = url.toLowerCase();
+    if (u == 'about:blank') return true;
+    if (u.startsWith('data:text/html')) return true;
     return false;
   }
 
@@ -822,7 +841,13 @@ class _ReadingScreenState extends State<ReadingScreen> {
       }
     }
 
-    void showErr(String message) {
+    void showErr(String message, [Object? cause, StackTrace? st]) {
+      if (cause != null) {
+        debugPrint('[BookOpen] $message | $cause');
+        if (st != null) debugPrint('[BookOpen] $st');
+      } else {
+        debugPrint('[BookOpen] $message');
+      }
       if (mounted) setState(() { _isLoading = false; _error = message; _loadingMessage = null; });
     }
 
@@ -844,6 +869,10 @@ class _ReadingScreenState extends State<ReadingScreen> {
         showErr('This book wasn’t found. It may have been moved or deleted.');
         return;
       }
+      if (!ZipHandler.isZipFile(filePath)) {
+        showErr('Unsupported book format. Only ZIP books are supported.');
+        return;
+      }
       final encBookId = dbBook?.encBookId ?? widget.book.encBookId;
       final encKeyB64 = dbBook?.encKeyB64 ?? widget.book.encKeyB64;
       final encNonceB64 = dbBook?.encNonceB64 ?? widget.book.encNonceB64;
@@ -859,6 +888,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         if (mounted) setState(() { _loadingMessage = 'unlocking'; });
         await Future.delayed(Duration.zero);
         final zipPath = filePath;
+        debugPrint('[BookOpen] encrypted book: unzip-first try zip=$zipPath');
         try {
           // Extract to disk only; never load the entire ZIP into memory (avoids OOM with large flipbooks).
           final extractDirPath = await ZipHandler.getExtractDirPath(zipPath);
@@ -872,14 +902,20 @@ class _ReadingScreenState extends State<ReadingScreen> {
           if (indexHtml != null) {
             unzipFirstSucceeded = true;
             _extractedDirPathForCleanup = extractDirPath;
+            debugPrint('[BookOpen] unzip-first ok index=$indexHtml');
             contentKey = await BookDecryptionService.getContentKey(
               bookId: encBookId!,
               keyEncB64: encKeyB64!,
               keyNonceB64: encNonceB64!,
             );
+          } else {
+            debugPrint(
+              '[BookOpen] unzip-first: no index.html under extract dir (will try whole-file decrypt): $extractDirPath',
+            );
           }
-        } catch (_) {
+        } catch (e, st) {
           // Zip invalid or no index (e.g. whole file encrypted): fall back to decrypt whole zip then unzip
+          debugPrint('[BookOpen] unzip-first failed (will try whole-file decrypt if needed): $e\n$st');
         }
         if (!unzipFirstSucceeded) {
           try {
@@ -892,8 +928,16 @@ class _ReadingScreenState extends State<ReadingScreen> {
             filePath = result.pathToUse;
             _decryptedCachePath = result.pathToUse;
             file = File(filePath);
-          } catch (e) {
-            showErr('This book couldn’t be opened. It may be damaged or in the wrong format.');
+          } catch (e, st) {
+            final err = e.toString();
+            final tooLarge = err.contains('too large') || err.contains('Maximum supported');
+            showErr(
+              tooLarge
+                  ? 'This book file is too large to decrypt on this device. Try a smaller book or a device with more memory.'
+                  : 'This book couldn’t be opened. It may be damaged or in the wrong format.',
+              e,
+              st,
+            );
             return;
           }
         }
@@ -915,8 +959,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
         try {
           processed = await ZipHandler.processBookFileOffMain(filePath);
           filePath = processed.path;
-        } on FormatException catch (_) {
-          showErr('Incorrect format.');
+        } on FormatException catch (e, st) {
+          showErr('Incorrect format.', e, st);
           return;
         }
         file = File(filePath);
@@ -951,7 +995,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
       }
 
       if (mounted) setState(() { _loadingMessage = 'loading'; });
+      debugPrint('[BookOpen] starting local server bookDir=${bookDirectory.path} encrypted=${contentKey != null}');
       await _startLocalServer(bookDirectory, contentKey: contentKey);
+      debugPrint('[BookOpen] local server listening on port $_serverPort');
       if (Platform.isAndroid && contentKey != null) {
         unawaited(_predecryptVideosInBackground(bookDirectory, contentKey));
       }
@@ -1010,7 +1056,8 @@ class _ReadingScreenState extends State<ReadingScreen> {
           }
           try {
             _controller?.loadRequest(Uri.parse(bookUrl));
-          } catch (e) {
+          } catch (e, st) {
+            debugPrint('[BookOpen] WebView loadRequest failed: $e\n$st');
             if (mounted) {
               setState(() {
                 _isLoading = false;
@@ -1020,10 +1067,12 @@ class _ReadingScreenState extends State<ReadingScreen> {
           }
         });
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[BookOpen] open book failed: $e\n$st');
       await _stopLocalServer();
       if (mounted) {
         final errorStr = e.toString().toLowerCase();
+        final isTooLarge = errorStr.contains('too large') || errorStr.contains('maximum supported');
         final isFormatOrDecrypt = errorStr.contains('format') ||
             errorStr.contains('invalid zip') ||
             errorStr.contains('corrupt') ||
@@ -1032,8 +1081,11 @@ class _ReadingScreenState extends State<ReadingScreen> {
             errorStr.contains('authentication') ||
             errorStr.contains('wrong mac') ||
             errorStr.contains('index.html');
-        final String friendlyMessage =
-            isFormatOrDecrypt ? 'This book couldn’t be opened. It may be damaged or in the wrong format.' : 'This book couldn’t be opened.';
+        final String friendlyMessage = isTooLarge
+            ? 'This book file is too large to decrypt on this device. Try a smaller book or a device with more memory.'
+            : isFormatOrDecrypt
+                ? 'This book couldn’t be opened. It may be damaged or in the wrong format.'
+                : 'This book couldn’t be opened.';
         setState(() { _isLoading = false; _error = friendlyMessage; _loadingMessage = null; });
       }
     }

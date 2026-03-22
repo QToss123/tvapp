@@ -80,8 +80,13 @@ String _normalizePath(String p) {
 bool isEncryptedPath(String requestedPath, Set<String>? encryptedPaths) {
   final normalized = requestedPath.replaceAll(r'\', '/').toLowerCase().trim();
   final noLeading = normalized.replaceFirst(RegExp(r'^/+'), '');
+  // Product rule: everything under resources/ is encrypted.
+  // Keep manifest matches too, so encrypted files outside resources/ still decrypt.
+  if (noLeading.startsWith('resources/')) {
+    return true;
+  }
   if (encryptedPaths != null && encryptedPaths.isNotEmpty) {
     return encryptedPaths.contains(noLeading);
   }
-  return noLeading.startsWith('resources/');
+  return false;
 }

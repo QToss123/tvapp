@@ -5,8 +5,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 
 /// Utility class for handling ZIP file operations.
-/// Uses InputFileStream + extractFileToDisk to avoid loading entire ZIP into memory (OOM fix).
+/// Uses [extractFileToDisk] (archive 4.x: streaming zip decode + small write buffers on Android).
 class ZipHandler {
+  /// Smaller than archive default (1 MB) to reduce peak heap on low-RAM Android TV / emulators.
+  static const int _androidExtractBufferBytes = 64 * 1024;
   /// Checks if a file is a ZIP file based on its extension
   static bool isZipFile(String filePath) {
     final lowerPath = filePath.toLowerCase();
@@ -18,19 +20,26 @@ class ZipHandler {
     try {
       final zipFile = File(zipFilePath);
       if (!await zipFile.exists()) {
+        debugPrint('[BookOpen] unzip: file not found: $zipFilePath');
         throw Exception('ZIP file not found: $zipFilePath');
       }
+      final zipSize = await zipFile.length();
+      debugPrint('[BookOpen] unzip start: ${path.basename(zipFilePath)} (${zipSize} bytes) -> $extractDirPath');
       final extractDir = Directory(extractDirPath);
       if (await extractDir.exists()) {
         await extractDir.delete(recursive: true);
       }
       await extractDir.create(recursive: true);
 
-      // Use archive_io extractFileToDisk: streams from InputFileStream, avoids readAsBytes OOM
-      await extractFileToDisk(zipFilePath, extractDirPath);
+      // archive 4.x: zip uses decodeStream (does not load entire archive into RAM like 3.x decodeBuffer).
+      // Tight buffer on Android avoids 1 MB OutputFileStream allocations when heap is fragmented.
+      final bufferSize = Platform.isAndroid ? _androidExtractBufferBytes : null;
+      await extractFileToDisk(zipFilePath, extractDirPath, bufferSize: bufferSize);
 
+      debugPrint('[BookOpen] unzip done: $extractDirPath');
       return extractDir.path;
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[BookOpen] unzip failed: $zipFilePath\n  $e\n$st');
       rethrow;
     }
   }
@@ -64,7 +73,8 @@ class ZipHandler {
       }
 
       return null;
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[BookOpen] findIndexHtml error in $directoryPath: $e\n$st');
       return null;
     }
   }
@@ -81,11 +91,13 @@ class ZipHandler {
         return (path: existingIndex, wasExtracted: false);
       }
     }
+    debugPrint('[BookOpen] processBookFileOffMain: extracting ${path.basename(filePath)}');
     final extractedPath = await compute(
       extractZipToDirBackground,
       (filePath, extractDir.path),
     );
     if (extractedPath == null) {
+      debugPrint('[BookOpen] processBookFileOffMain: extract returned null for $filePath');
       throw Exception('Failed to extract ZIP file');
     }
     final indexHtmlPath = await findIndexHtml(extractedPath);

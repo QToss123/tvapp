@@ -70,14 +70,17 @@ Future<DecryptResult> decryptBookFileIfNeeded({
       encNonceB64 != null && encNonceB64.isNotEmpty;
 
   if (!hasKeys) {
+    debugPrint('[BookOpen] decrypt: missing keys for $encryptedFilePath');
     throw Exception('Missing encryption keys for: $encryptedFilePath');
   }
 
   final file = File(encryptedFilePath);
   if (!await file.exists()) {
+    debugPrint('[BookOpen] decrypt: encrypted file missing: $encryptedFilePath');
     throw Exception('Encrypted file not found: $encryptedFilePath');
   }
 
+  final encSize = await file.length();
   final decryptedPath = await decryptedPathFor(
     encryptedFilePath: encryptedFilePath,
     encBookId: encBookId,
@@ -87,6 +90,7 @@ Future<DecryptResult> decryptBookFileIfNeeded({
   // Check if file already decrypted (reuse _decrypted.zip)
   final alreadyDecrypted = await decryptedFile.exists();
   if (alreadyDecrypted) {
+    debugPrint('[BookOpen] decrypt: reuse cached $decryptedPath');
     return DecryptResult(
       pathToUse: decryptedPath,
       wasDecrypted: true,
@@ -95,23 +99,33 @@ Future<DecryptResult> decryptBookFileIfNeeded({
     );
   }
 
-  // Run decryption in a background isolate so UI stays responsive (no "stuck" on TV)
-  await compute(
-    decryptOnDiskBackground,
-    DecryptOnDiskParams(
-      encryptedFilePath: encryptedFilePath,
-      bookId: encBookId!,
-      keyEncB64: encKeyB64!,
-      keyNonceB64: encNonceB64!,
-      outputFilePath: decryptedPath,
-    ),
+  debugPrint(
+    '[BookOpen] decrypt: whole-file decrypt start bookId=$encBookId (${encSize} bytes) -> $decryptedPath',
   );
+  // Run decryption in a background isolate so UI stays responsive (no "stuck" on TV)
+  try {
+    await compute(
+      decryptOnDiskBackground,
+      DecryptOnDiskParams(
+        encryptedFilePath: encryptedFilePath,
+        bookId: encBookId!,
+        keyEncB64: encKeyB64!,
+        keyNonceB64: encNonceB64!,
+        outputFilePath: decryptedPath,
+      ),
+    );
+  } catch (e, st) {
+    debugPrint('[BookOpen] decrypt: whole-file decrypt failed\n  $e\n$st');
+    rethrow;
+  }
 
   // Verify decrypted file exists and log
   final verify = File(decryptedPath);
   if (!await verify.exists()) {
+    debugPrint('[BookOpen] decrypt: output missing after compute: $decryptedPath');
     throw Exception('Decryption completed but decrypted file not found: $decryptedPath');
   }
+  debugPrint('[BookOpen] decrypt: whole-file decrypt ok -> $decryptedPath');
 
   // Debug: copy decrypted book to a folder next to the executable for inspection
   if (kDebugMode) {

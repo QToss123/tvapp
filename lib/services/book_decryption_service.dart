@@ -64,11 +64,8 @@ Future<String> decryptOnDiskBackground(DecryptOnDiskParams p) async {
 
 /// Service for downloading and decrypting encrypted books from the API.
 /// Uses [cryptography] + [cryptography_flutter] for native AES-GCM (~50x faster on Android).
-/// File size guard prevents OOM on large files (AES-GCM requires full ciphertext in memory).
+/// Whole-file decrypt uses [AesGcm.decryptStream] so size is not limited by loading full RAM buffers.
 class BookDecryptionService {
-  /// Max size (bytes) for decryption - avoid OOM on low-memory devices (e.g. TV).
-  static const int _maxDecryptFileSizeBytes = 150 * 1024 * 1024; // 150 MB
-
   static const String _masterKeyB64 = String.fromEnvironment(
     'BOOK_KEY',
     defaultValue: 'qkvIPRQyvmiM5V7P4NUbQqVyKWnkisvGM2DKd7ZcGXU=',
@@ -95,31 +92,18 @@ class BookDecryptionService {
   }) async {
     final tempPath = await _downloadToFile(downloadUrl, onProgress);
     final tempFile = File(tempPath);
-    final encryptedLength = await tempFile.length();
-    if (encryptedLength > _maxDecryptFileSizeBytes) {
-      try { await tempFile.delete(); } catch (_) {}
-      throw Exception(
-        'Downloaded file too large to decrypt on this device (${(encryptedLength / (1024 * 1024)).toStringAsFixed(1)} MB). Maximum supported: ${_maxDecryptFileSizeBytes ~/ (1024 * 1024)} MB.',
-      );
-    }
-
-    final contentKey = await _decryptContentKey(
-      keyEncB64: keyEncB64,
-      keyNonceB64: keyNonceB64,
-      bookId: bookId,
-    );
-
-    final encryptedBytes = await tempFile.readAsBytes();
     try {
-      final decryptedBytes = await _decryptFileContent(
-        encryptedData: encryptedBytes,
-        contentKey: contentKey,
+      final contentKey = await _decryptContentKey(
+        keyEncB64: keyEncB64,
+        keyNonceB64: keyNonceB64,
+        bookId: bookId,
       );
-
-      final file = File(targetFilePath);
-      await file.parent.create(recursive: true);
-      if (await file.exists()) await file.delete();
-      await file.writeAsBytes(decryptedBytes);
+      await _decryptWholeEncryptedFileStreamToPath(
+        encryptedFile: tempFile,
+        outputFilePath: targetFilePath,
+        contentKey: contentKey,
+        aad: const [],
+      );
       return targetFilePath;
     } finally {
       try {
@@ -129,7 +113,7 @@ class BookDecryptionService {
   }
 
   /// Decrypts an encrypted file already on disk and writes decrypted bytes to [outputFilePath].
-  /// Format: 12-byte nonce + ciphertext + 16-byte MAC. Uses native AES-GCM when available.
+  /// Format: 12-byte nonce + ciphertext + 16-byte MAC. Streams via [AesGcm.decryptStream] (no full-file RAM load).
   static Future<String> decryptFileOnDisk({
     required String encryptedFilePath,
     required String bookId,
@@ -142,14 +126,6 @@ class BookDecryptionService {
       if (!await encryptedFile.exists()) {
         throw Exception('Encrypted file not found: $encryptedFilePath');
       }
-      final fileSize = await encryptedFile.length();
-      if (fileSize > _maxDecryptFileSizeBytes) {
-        throw Exception(
-          'File too large to decrypt on this device (${(fileSize / (1024 * 1024)).toStringAsFixed(1)} MB). Maximum supported: ${_maxDecryptFileSizeBytes ~/ (1024 * 1024)} MB.',
-        );
-      }
-
-      final encryptedBytes = await encryptedFile.readAsBytes();
 
       final contentKey = await _decryptContentKey(
         keyEncB64: keyEncB64,
@@ -157,21 +133,69 @@ class BookDecryptionService {
         bookId: bookId,
       );
 
-      final stopwatch = Stopwatch()..start();
-      final decryptedBytes = await _decryptFileContent(
-        encryptedData: encryptedBytes,
+      await _decryptWholeEncryptedFileStreamToPath(
+        encryptedFile: encryptedFile,
+        outputFilePath: outputFilePath,
         contentKey: contentKey,
+        aad: const [],
       );
-      stopwatch.stop();
-
-      final outFile = File(outputFilePath);
-      await outFile.parent.create(recursive: true);
-      if (await outFile.exists()) await outFile.delete();
-      await outFile.writeAsBytes(decryptedBytes);
       return outputFilePath;
     } catch (e) {
       if (e is Exception) rethrow;
       throw Exception('Decryption failed: $e');
+    }
+  }
+
+  /// AES-GCM whole-file layout: nonce ‖ ciphertext ‖ MAC. Decrypts with bounded RAM using [decryptStream].
+  static Future<void> _decryptWholeEncryptedFileStreamToPath({
+    required File encryptedFile,
+    required String outputFilePath,
+    required Uint8List contentKey,
+    List<int> aad = const [],
+  }) async {
+    final fileSize = await encryptedFile.length();
+    if (fileSize < _nonceLength + _macLength) {
+      throw Exception('Encrypted data too short');
+    }
+
+    final raf = await encryptedFile.open();
+    late final Uint8List nonce;
+    late final Uint8List macBytes;
+    try {
+      await raf.setPosition(0);
+      final n = await raf.read(_nonceLength);
+      if (n.length != _nonceLength) {
+        throw Exception('Could not read nonce');
+      }
+      nonce = n;
+      await raf.setPosition(fileSize - _macLength);
+      final m = await raf.read(_macLength);
+      if (m.length != _macLength) {
+        throw Exception('Could not read MAC');
+      }
+      macBytes = m;
+    } finally {
+      await raf.close();
+    }
+
+    final ciphertextStream = encryptedFile.openRead(_nonceLength, fileSize - _macLength);
+    final secretKey = SecretKey(contentKey);
+    final outFile = File(outputFilePath);
+    await outFile.parent.create(recursive: true);
+    if (await outFile.exists()) await outFile.delete();
+    final sink = outFile.openWrite();
+    try {
+      await for (final chunk in _aesGcm.decryptStream(
+        ciphertextStream,
+        secretKey: secretKey,
+        nonce: nonce,
+        mac: Mac(macBytes),
+        aad: aad,
+      )) {
+        sink.add(chunk);
+      }
+    } finally {
+      await sink.close();
     }
   }
 

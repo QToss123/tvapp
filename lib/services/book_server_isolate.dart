@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import '../utils/book_manifest.dart';
 import 'book_decryption_service.dart';
@@ -27,9 +28,11 @@ void bookServerIsolateEntry(SendPort mainSendPort) async {
       try {
         server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
         final encryptedPaths = await loadEncryptedPathsFromManifest(bookDirPath);
+        debugPrint('[BookOpen] book server isolate listening on 127.0.0.1:$port dir=$bookDirPath');
         mainSendPort.send('ready');
         _handleRequests(server!, bookDirPath, contentKey, encryptedPaths);
-      } catch (e) {
+      } catch (e, st) {
+        debugPrint('[BookOpen] book server isolate failed: $e\n$st');
         mainSendPort.send(['error', e.toString()]);
       }
     } else if (message == 'close') {
