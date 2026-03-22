@@ -23,6 +23,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   static const _kLicenseNumber = 'licenseNumber';
+  static const _kDefaultLicenseNumber = 'CLA-CL367-S87-O97L0SR1OK';
   static const _kLicenseActivated = 'licenseActivated';
   static const _kLicenseExpiryDate = 'licenseExpiryDate';
   static const _kLicenseToken = 'license_token';
@@ -70,8 +71,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
+    final storedLicense = prefs.getString(_kLicenseNumber);
+    if (storedLicense != _kDefaultLicenseNumber) {
+      await prefs.setString(_kLicenseNumber, _kDefaultLicenseNumber);
+    }
     setState(() {
-      _licenseController.text = prefs.getString(_kLicenseNumber) ?? '';
+      _licenseController.text = _kDefaultLicenseNumber;
       _isLicenseActivated = prefs.getBool(_kLicenseActivated) ?? false;
       _syncType = prefs.getString(_kSyncType) ?? 'online';
       _storageLocation = prefs.getString(_kStorageLocation) ?? 'Not selected';
@@ -596,7 +601,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (!mounted) return;
     setState(() {
-      _licenseController.text = '';
+      _licenseController.text = _kDefaultLicenseNumber;
       _isLicenseActivated = false;
       _syncType = 'online';
       _storageLocation = 'Not selected';
