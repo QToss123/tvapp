@@ -1,54 +1,63 @@
-FROM ubuntu:24.04
+FROM --platform=linux/amd64 ubuntu:24.04
 
-USER root
-
-# 1. Install System Dependencies
+# 1. Install dependencies + fix /lib64 linker for QEMU amd64 emulation on ARM hosts
 RUN apt-get update && apt-get install -y \
-    curl git unzip xz-utils libglu1-mesa openjdk-17-jdk wget file \
-    && rm -rf /var/lib/apt/lists/*
+    curl git unzip xz-utils zip libglu1-mesa openjdk-17-jdk wget file \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /lib64 \
+    && ln -sf /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2 2>/dev/null || true
 
-# 2. Define Clean Paths
+# 2. Resolve JAVA_HOME (arch-independent symlink)
+RUN ln -sf /usr/lib/jvm/java-17-openjdk-* /usr/lib/jvm/java-17-openjdk
+
+# 3. Environment variables
 ENV ANDROID_HOME=/opt/android-sdk
 ENV FLUTTER_HOME=/opt/flutter
-ENV PATH="${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${FLUTTER_HOME}/bin:${PATH}"
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk
+ENV PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$FLUTTER_HOME/bin:$JAVA_HOME/bin
 
-# 3. Install Android SDK (Native ARM64 Tools)
-RUN mkdir -p ${ANDROID_HOME}/cmdline-tools && \
-    curl -L https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/sdk.zip && \
-    unzip -q /tmp/sdk.zip -d ${ANDROID_HOME}/cmdline-tools && \
-    mv ${ANDROID_HOME}/cmdline-tools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest && \
-    rm /tmp/sdk.zip
+# 4. Install Android SDK cmdline tools
+RUN mkdir -p $ANDROID_HOME/cmdline-tools && \
+    wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O /tmp/tools.zip && \
+    unzip -q /tmp/tools.zip -d $ANDROID_HOME/cmdline-tools && \
+    mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest && \
+    rm /tmp/tools.zip
 
-# 4. Install Flutter from Scratch
-RUN git clone https://github.com/flutter/flutter.git -b stable ${FLUTTER_HOME}
-RUN git config --global --add safe.directory ${FLUTTER_HOME}
+# 5. Install Flutter (stable)
+RUN git clone https://github.com/flutter/flutter.git -b stable $FLUTTER_HOME
 
-# 5. Accept Licenses and install Platforms
+# 6. Pre-cache Flutter Android artifacts
+RUN flutter precache --android
+
+# 7. Accept licenses & install SDK
 RUN yes | sdkmanager --licenses && \
-    sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+    sdkmanager \
+      "platform-tools" \
+      "platforms;android-35" \
+      "platforms;android-36" \
+      "build-tools;35.0.0"
 
-# 6. 🔥 THE FIX: Force download of ARM64 Engine
+# 8. Flutter setup
 RUN flutter config --no-analytics && \
-    # This downloads the 'linux-arm64' version of gen_snapshot
-    flutter precache --android --linux --force --universal && \
-    flutter doctor -v
+    (flutter doctor -v || true)
 
-# 7. App Setup
+# 9. App build
+WORKDIR /app
+
+COPY pubspec.* ./
+RUN flutter pub get
+
+COPY . .
+
 ARG BACKEND_URL
 ARG BOOK_KEY
 ARG PACKAGE_SUFFIX
 
-WORKDIR /app
-COPY pubspec.* ./
-RUN flutter pub get
-COPY . .
-
-# 8. Build with Java 17 Toolchain
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
-ENV GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.java.installations.paths=$JAVA_HOME"
-
 RUN flutter build apk --release \
-      --target-platform android-arm64 \
-      --dart-define=BACKEND_URL=${BACKEND_URL} \
-      --dart-define=BOOK_KEY=${BOOK_KEY} \
-      --dart-define=PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
+    --dart-define=BACKEND_URL=${BACKEND_URL} \
+    --dart-define=BOOK_KEY=${BOOK_KEY} \
+    --dart-define=PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
+
+# 10. Copy APK to /artifact for easy extraction
+RUN mkdir -p /artifact && \
+    cp /app/build/app/outputs/flutter-apk/app-release.apk /artifact/app-release.apk
