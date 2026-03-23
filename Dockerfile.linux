@@ -1,68 +1,49 @@
-# ---------------------------------------
-# Linux Desktop Build (amd64)
-# ---------------------------------------
-    FROM --platform=linux/amd64 ubuntu:22.04
+FROM --platform=linux/amd64 ubuntu:22.04
 
-    ENV DEBIAN_FRONTEND=noninteractive
-    ENV FLUTTER_HOME=/opt/flutter
-    ENV PATH=$FLUTTER_HOME/bin:$PATH
-    
-    RUN apt-get update && apt-get install -y --no-install-recommends \
-        clang \
-        cmake \
-        ninja-build \
-        pkg-config \
-        libgtk-3-dev \
-        liblzma-dev \
-        libstdc++-12-dev \
-        libwebkit2gtk-4.1-dev \
-        llvm-14 \
-        lld-14 \
-        wget \
-        git \
-        curl \
-        ca-certificates \
-        xz-utils \
-        unzip \
-        && rm -rf /var/lib/apt/lists/*
-    
-    ARG FLUTTER_VERSION=3.41.5
-    ARG FLUTTER_ZIP_URL=https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz
-    
-    ARG BACKEND_URL=
-    ARG BOOK_KEY=
-    ARG PACKAGE_SUFFIX=
-    
-    ENV BACKEND_URL=${BACKEND_URL}
-    ENV BOOK_KEY=${BOOK_KEY}
-    ENV PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
-    
-    RUN wget -q -O flutter.tar.xz ${FLUTTER_ZIP_URL} && \
-        tar -xJf flutter.tar.xz -C /opt && \
-        rm flutter.tar.xz
-    
-    # 🔥 CRITICAL FIX
-    RUN git config --global --add safe.directory /opt/flutter && \
-        flutter config --enable-linux-desktop && \
-        flutter config --no-analytics && \
-        flutter precache --linux --no-web --force && \
-        flutter doctor -v
-    
-    WORKDIR /app
-    
-    COPY pubspec.* ./
-    RUN flutter pub get
-    
-    COPY . .
-    
-    RUN flutter clean && \
-        flutter build linux --release \
-          --dart-define=BACKEND_URL=${BACKEND_URL} \
-          --dart-define=BOOK_KEY=${BOOK_KEY} \
-          --dart-define=PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
-    
-    RUN mkdir -p /artifacts && \
-        cp -a build/linux/x64/release/bundle /artifacts/linux-bundle && \
-        ls -la /artifacts/
-    
-    CMD ["/bin/sh", "-c", "echo '✅ Bundle: /artifacts/linux-bundle' && ls -la /artifacts/"]
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 1. Install dependencies + fix /lib64 linker for QEMU amd64 emulation on ARM hosts
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang cmake ninja-build pkg-config \
+    libgtk-3-dev liblzma-dev libstdc++-12-dev libwebkit2gtk-4.1-dev \
+    llvm-14 lld-14 \
+    wget git curl ca-certificates xz-utils unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /lib64 \
+    && ln -sf /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2 2>/dev/null || true
+
+# 2. Install Flutter (stable)
+ENV FLUTTER_HOME=/opt/flutter
+ENV PATH=$FLUTTER_HOME/bin:$PATH
+
+RUN git clone https://github.com/flutter/flutter.git -b stable $FLUTTER_HOME
+
+# 3. Pre-cache Flutter Linux desktop artifacts
+RUN flutter precache --linux --no-web --force
+
+# 4. Flutter setup
+RUN git config --global --add safe.directory /opt/flutter && \
+    flutter config --enable-linux-desktop && \
+    flutter config --no-analytics && \
+    (flutter doctor -v || true)
+
+# 5. App build
+WORKDIR /app
+
+COPY pubspec.* ./
+RUN flutter pub get
+
+COPY . .
+
+ARG BACKEND_URL
+ARG BOOK_KEY
+ARG PACKAGE_SUFFIX
+
+RUN flutter build linux --release \
+    --dart-define=BACKEND_URL=${BACKEND_URL} \
+    --dart-define=BOOK_KEY=${BOOK_KEY} \
+    --dart-define=PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
+
+# 6. Copy bundle to /artifact for easy extraction
+RUN mkdir -p /artifact && \
+    cp -a build/linux/x64/release/bundle /artifact/linux-bundle

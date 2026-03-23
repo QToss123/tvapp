@@ -1,58 +1,54 @@
-# Windows container: Flutter Windows desktop build under C:\artifacts (for GitLab CI extract).
-# Requires: Docker with Windows containers (not Linux containers).
-# Build: docker build -f Dockerfile.windows -t tv-books-win --build-arg BACKEND_URL=... --build-arg BOOK_KEY=... --build-arg PACKAGE_SUFFIX=_Dev .
+# escape=`
+# Requires: Docker with Windows containers on a Windows host (cannot build on Mac/Linux).
+# Build: docker build -f Dockerfile.windows -t app-windows --build-arg BACKEND_URL=... --build-arg BOOK_KEY=... --build-arg PACKAGE_SUFFIX=_Dev .
 
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
 SHELL ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command"]
 
-# Visual Studio Build Tools (required for Flutter Windows desktop)
+# 1. Visual Studio Build Tools (required for Flutter Windows desktop)
 ARG CHANNEL_URL=https://aka.ms/vs/17/release/channel
-ADD ${CHANNEL_URL} "C:\\TEMP\\VisualStudio.chman"
-ADD https://aka.ms/vs/17/release/vs_buildtools.exe "C:\\TEMP\\vs_buildtools.exe"
-RUN C:\\TEMP\\vs_buildtools.exe --quiet --wait --norestart --nocache \
-    --channelUri C:\\TEMP\\VisualStudio.chman \
-    --installChannelUri C:\\TEMP\\VisualStudio.chman \
-    --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended \
-    --installPath C:\\BuildTools
+ADD ${CHANNEL_URL} "C:\TEMP\VisualStudio.chman"
+ADD https://aka.ms/vs/17/release/vs_buildtools.exe "C:\TEMP\vs_buildtools.exe"
+RUN C:\TEMP\vs_buildtools.exe --quiet --wait --norestart --nocache `
+    --channelUri C:\TEMP\VisualStudio.chman `
+    --installChannelUri C:\TEMP\VisualStudio.chman `
+    --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended `
+    --installPath C:\BuildTools
 
-# Git (needed by Flutter)
-RUN Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.47.0.windows.1/Git-2.47.0-64-bit.exe' -OutFile C:\\TEMP\\git.exe -UseBasicParsing; \
-    Start-Process -FilePath 'C:\\TEMP\\git.exe' -ArgumentList '/VERYSILENT /NORESTART' -Wait; \
-    Remove-Item C:\\TEMP\\git.exe -Force
+# 2. Git (needed by Flutter)
+RUN Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.47.0.windows.1/Git-2.47.0-64-bit.exe' -OutFile C:\TEMP\git.exe -UseBasicParsing; `
+    Start-Process -FilePath 'C:\TEMP\git.exe' -ArgumentList '/VERYSILENT /NORESTART' -Wait; `
+    Remove-Item C:\TEMP\git.exe -Force
 
-# Flutter >=3.35 matches pubspec (Dart >=3.10). Override: --build-arg FLUTTER_VERSION=3.35.4
-ARG FLUTTER_VERSION=3.35.4
-ARG FLUTTER_ZIP_URL=https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_${FLUTTER_VERSION}-stable.zip
-ENV FLUTTER_ZIP_URL=${FLUTTER_ZIP_URL}
-ARG BACKEND_URL=
-ARG BOOK_KEY=
-ARG PACKAGE_SUFFIX=
-ENV BACKEND_URL=${BACKEND_URL}
-ENV BOOK_KEY=${BOOK_KEY}
-ENV PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
-RUN Invoke-WebRequest -Uri $env:FLUTTER_ZIP_URL -OutFile C:\\TEMP\\flutter.zip -UseBasicParsing; \
-    Expand-Archive -Path C:\\TEMP\\flutter.zip -DestinationPath C:\\; \
-    Remove-Item C:\\TEMP\\flutter.zip -Force
-ENV PATH="C:\\flutter\\bin;${PATH}"
+# 3. Install Flutter (stable via git clone for latest version)
+RUN git clone https://github.com/flutter/flutter.git -b stable C:\flutter
+ENV PATH="C:\flutter\bin;${PATH}"
 
-RUN flutter config --no-analytics; \
+# 4. Flutter setup
+RUN flutter config --no-analytics; `
     flutter doctor -v 2>&1 | Write-Host
 
-# Cleanup installers
-RUN Remove-Item -LiteralPath C:\\TEMP -Recurse -Force -ErrorAction SilentlyContinue
+# 5. Cleanup installers
+RUN Remove-Item -LiteralPath C:\TEMP -Recurse -Force -ErrorAction SilentlyContinue
 
-# App lives here at build time (copied from context)
-WORKDIR C:\\app
+# 6. App build
+WORKDIR C:\app
 
-# Copy project (use .dockerignore to exclude build/ and .dart_tool/)
+COPY pubspec.* ./
+RUN flutter pub get
+
 COPY . .
 
-RUN flutter pub get; \
-    flutter build windows --release --dart-define=BACKEND_URL=$env:BACKEND_URL --dart-define=BOOK_KEY=$env:BOOK_KEY --dart-define=PACKAGE_SUFFIX=$env:PACKAGE_SUFFIX
+ARG BACKEND_URL
+ARG BOOK_KEY
+ARG PACKAGE_SUFFIX
 
-# GitLab / generic CI: fixed path inside image (Linux-based runners often skip this Dockerfile)
-RUN New-Item -ItemType Directory -Force -Path C:\\artifacts | Out-Null; \
-    Copy-Item -Recurse -Force C:\\app\\build\\windows\\x64\\runner\\Release C:\\artifacts\\windows-release
+RUN flutter build windows --release `
+    --dart-define=BACKEND_URL=$env:BACKEND_URL `
+    --dart-define=BOOK_KEY=$env:BOOK_KEY `
+    --dart-define=PACKAGE_SUFFIX=$env:PACKAGE_SUFFIX
 
-CMD ["powershell", "-Command", "Write-Host 'Artifacts: C:\\artifacts\\windows-release'; Get-ChildItem C:\\artifacts\\windows-release"]
+# 7. Copy build to C:\artifact for easy extraction
+RUN New-Item -ItemType Directory -Force -Path C:\artifact | Out-Null; `
+    Copy-Item -Recurse -Force C:\app\build\windows\x64\runner\Release C:\artifact\windows-release
