@@ -58,6 +58,6 @@ RUN flutter build apk --release \
     --dart-define=BOOK_KEY=${BOOK_KEY} \
     --dart-define=PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
 
-# 10. Copy APK to /artifact for easy extraction
-RUN mkdir -p /artifact && \
-    cp /app/build/app/outputs/flutter-apk/app-release.apk /artifact/app-release.apk
+# 10. Copy APK to /artifacts with suffix in filename
+RUN mkdir -p /artifacts && \
+    cp /app/build/app/outputs/flutter-apk/app-release.apk /artifacts/app-release${PACKAGE_SUFFIX}.apk

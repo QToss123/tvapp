@@ -44,6 +44,6 @@ RUN flutter build linux --release \
     --dart-define=BOOK_KEY=${BOOK_KEY} \
     --dart-define=PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
 
-# 6. Copy bundle to /artifact for easy extraction
-RUN mkdir -p /artifact && \
-    cp -a build/linux/x64/release/bundle /artifact/linux-bundle
+# 6. Copy bundle to /artifacts with suffix in name
+RUN mkdir -p /artifacts && \
+    cp -a build/linux/x64/release/bundle /artifacts/linux-bundle${PACKAGE_SUFFIX}

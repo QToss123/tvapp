@@ -49,6 +49,6 @@ RUN flutter build windows --release `
     --dart-define=BOOK_KEY=$env:BOOK_KEY `
     --dart-define=PACKAGE_SUFFIX=$env:PACKAGE_SUFFIX
 
-# 7. Copy build to C:\artifact for easy extraction
-RUN New-Item -ItemType Directory -Force -Path C:\artifact | Out-Null; `
-    Copy-Item -Recurse -Force C:\app\build\windows\x64\runner\Release C:\artifact\windows-release
+# 7. Copy build to C:\artifacts with suffix in name
+RUN New-Item -ItemType Directory -Force -Path C:\artifacts | Out-Null; `
+    Copy-Item -Recurse -Force C:\app\build\windows\x64\runner\Release C:\artifacts\windows-release$env:PACKAGE_SUFFIX
