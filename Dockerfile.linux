@@ -44,6 +44,20 @@ RUN flutter build linux --release \
     --dart-define=BOOK_KEY=${BOOK_KEY} \
     --dart-define=PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
 
-# 6. Copy bundle to /artifacts with suffix in name
-RUN mkdir -p /artifacts && \
+# 6. Package as .deb and copy to /artifacts
+ARG APP_NAME=tv-app-books
+ARG APP_VERSION=1.0.0
+
+RUN DEB_DIR=/tmp/${APP_NAME}_${APP_VERSION}_amd64 && \
+    mkdir -p ${DEB_DIR}/opt/${APP_NAME} && \
+    mkdir -p ${DEB_DIR}/usr/share/applications && \
+    mkdir -p ${DEB_DIR}/DEBIAN && \
+    cp -a build/linux/x64/release/bundle/* ${DEB_DIR}/opt/${APP_NAME}/ && \
+    printf 'Package: %s\nVersion: %s\nSection: utils\nPriority: optional\nArchitecture: amd64\nDepends: libgtk-3-0, libwebkit2gtk-4.1-0\nMaintainer: Liqvid <dev@liqvid.com>\nDescription: BurlingtonEnglish Bookshelf App\n' \
+      "${APP_NAME}" "${APP_VERSION}" > ${DEB_DIR}/DEBIAN/control && \
+    printf '[Desktop Entry]\nName=BurlingtonEnglish\nExec=/opt/%s/tv_app_books\nType=Application\nCategories=Education;\n' \
+      "${APP_NAME}" > ${DEB_DIR}/usr/share/applications/${APP_NAME}.desktop && \
+    dpkg-deb --build ${DEB_DIR} && \
+    mkdir -p /artifacts && \
+    cp ${DEB_DIR}.deb /artifacts/${APP_NAME}${PACKAGE_SUFFIX}_${APP_VERSION}_amd64.deb && \
     cp -a build/linux/x64/release/bundle /artifacts/linux-bundle${PACKAGE_SUFFIX}
