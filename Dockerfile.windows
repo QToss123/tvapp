@@ -23,11 +23,15 @@ RUN Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/down
 
 # 3. Install Flutter (stable via git clone for latest version)
 RUN git clone https://github.com/flutter/flutter.git -b stable C:\flutter
-ENV PATH="C:\flutter\bin;${PATH}"
 
-# 4. Flutter setup
-RUN flutter config --no-analytics; `
-    flutter doctor -v 2>&1 | Write-Host
+# PATH: ${PATH} is unreliable in Windows Dockerfiles (can be empty), which breaks child processes (0x2).
+ENV PATH="C:\\flutter\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Git\\bin;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0"
+
+# 4. Flutter setup (use flutter.bat explicitly; ensures correct resolution in minimal PATH scenarios)
+RUN $ErrorActionPreference = 'Stop'; `
+    if (-not (Test-Path 'C:\flutter\bin\flutter.bat')) { throw 'flutter.bat missing' }; `
+    & 'C:\flutter\bin\flutter.bat' config --no-analytics; `
+    & 'C:\flutter\bin\flutter.bat' doctor -v 2>&1 | Write-Host
 
 # 5. Cleanup installers
 RUN Remove-Item -LiteralPath C:\TEMP -Recurse -Force -ErrorAction SilentlyContinue
