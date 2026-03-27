@@ -7,14 +7,21 @@ FROM mcr.microsoft.com/windows/servercore:ltsc2022
 SHELL ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command"]
 
 # 1. Visual Studio Build Tools (required for Flutter Windows desktop)
+# Use the same install root as Microsoft’s container docs; a short path like C:\BuildTools often leaves
+# VC\Auxiliary\Build\vcvars64.bat missing while the workload reports success.
 ARG CHANNEL_URL=https://aka.ms/vs/17/release/channel
 ADD ${CHANNEL_URL} "C:\TEMP\VisualStudio.chman"
 ADD https://aka.ms/vs/17/release/vs_buildtools.exe "C:\TEMP\vs_buildtools.exe"
-RUN C:\TEMP\vs_buildtools.exe --quiet --wait --norestart --nocache `
-    --channelUri C:\TEMP\VisualStudio.chman `
-    --installChannelUri C:\TEMP\VisualStudio.chman `
-    --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended `
-    --installPath C:\BuildTools
+RUN $installPath = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools'; `
+    $p = Start-Process -FilePath 'C:\TEMP\vs_buildtools.exe' -ArgumentList @( `
+        '--quiet', '--wait', '--norestart', '--nocache', `
+        '--channelUri', 'C:\TEMP\VisualStudio.chman', `
+        '--installChannelUri', 'C:\TEMP\VisualStudio.chman', `
+        '--add', 'Microsoft.VisualStudio.Workload.VCTools', `
+        '--add', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', `
+        '--includeRecommended', `
+        '--installPath', $installPath) -Wait -PassThru; `
+    if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "vs_buildtools.exe failed with exit $($p.ExitCode)" }
 
 # 2. Git (needed by Flutter)
 RUN Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.47.0.windows.1/Git-2.47.0-64-bit.exe' -OutFile C:\TEMP\git.exe -UseBasicParsing; `
@@ -49,10 +56,9 @@ ARG BACKEND_URL
 ARG BOOK_KEY
 ARG PACKAGE_SUFFIX
 
-# Flutter needs MSVC/CMake/ninja on PATH; VS Build Tools only expose them after vcvars64.bat.
-# Use cmd so `call` runs in the same shell as flutter (PowerShell would not keep vcvars env).
+# Flutter needs MSVC/CMake/ninja on PATH; VsDevCmd sets them for this cmd session (same install root as above).
 SHELL ["cmd", "/S", "/C"]
-RUN call "C:\BuildTools\VC\Auxiliary\Build\vcvars64.bat" && `
+RUN call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 && `
     set "PATH=C:\flutter\bin;C:\Program Files\Git\cmd;C:\Program Files\Git\bin;%PATH%" && `
     cd /d C:\app && `
     flutter build windows --release `
