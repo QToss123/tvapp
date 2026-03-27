@@ -31,6 +31,7 @@ ENV PATH="C:\\flutter\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Git\\b
 RUN $ErrorActionPreference = 'Stop'; `
     if (-not (Test-Path 'C:\flutter\bin\flutter.bat')) { throw 'flutter.bat missing' }; `
     & 'C:\flutter\bin\flutter.bat' config --no-analytics; `
+    & 'C:\flutter\bin\flutter.bat' config --enable-windows-desktop; `
     & 'C:\flutter\bin\flutter.bat' doctor -v 2>&1 | Write-Host
 
 # 5. Cleanup installers
@@ -48,10 +49,21 @@ ARG BACKEND_URL
 ARG BOOK_KEY
 ARG PACKAGE_SUFFIX
 
-RUN flutter build windows --release `
-    --dart-define=BACKEND_URL=$env:BACKEND_URL `
-    --dart-define=BOOK_KEY=$env:BOOK_KEY `
-    --dart-define=PACKAGE_SUFFIX=$env:PACKAGE_SUFFIX
+# Flutter needs MSVC/CMake/ninja on PATH; VS Build Tools only expose them after vcvars64.bat.
+# Use cmd so `call` runs in the same shell as flutter (PowerShell would not keep vcvars env).
+SHELL ["cmd", "/S", "/C"]
+RUN call "C:\BuildTools\VC\Auxiliary\Build\vcvars64.bat" && `
+    set "PATH=C:\flutter\bin;C:\Program Files\Git\cmd;C:\Program Files\Git\bin;%PATH%" && `
+    cd /d C:\app && `
+    flutter build windows --release `
+    --dart-define=BACKEND_URL=%BACKEND_URL% `
+    --dart-define=BOOK_KEY=%BOOK_KEY% `
+    --dart-define=PACKAGE_SUFFIX=%PACKAGE_SUFFIX%
+
+SHELL ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command"]
+
+# Persist suffix for next step (ARG is not reliably exposed as $env: in all Windows Docker builds)
+ENV PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
 
 # 7. Copy build to C:\artifacts with suffix in name
 RUN New-Item -ItemType Directory -Force -Path C:\artifacts | Out-Null; `
