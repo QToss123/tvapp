@@ -9,18 +9,32 @@ SHELL ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command"]
 # 1. Visual Studio Build Tools (required for Flutter Windows desktop)
 # Use the same install root as Microsoft’s container docs; a short path like C:\BuildTools often leaves
 # VC\Auxiliary\Build\vcvars64.bat missing while the workload reports success.
+#
+# This step routinely takes 30–90+ minutes: the bootstrapper runs with --quiet, so Docker logs look idle.
+# Build with enough RAM (e.g. docker build -m 4g); under-provisioned hosts can appear to hang or fail.
 ARG CHANNEL_URL=https://aka.ms/vs/17/release/channel
 ADD ${CHANNEL_URL} "C:\TEMP\VisualStudio.chman"
 ADD https://aka.ms/vs/17/release/vs_buildtools.exe "C:\TEMP\vs_buildtools.exe"
-RUN $installPath = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools'; `
-    $p = Start-Process -FilePath 'C:\TEMP\vs_buildtools.exe' -ArgumentList @( `
+RUN Write-Host 'Installing Visual Studio Build Tools (VCTools). Expect 30-90+ min; heartbeat lines every 2 min are normal.'; `
+    $installPath = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools'; `
+    $vsArgs = @( `
         '--quiet', '--wait', '--norestart', '--nocache', `
         '--channelUri', 'C:\TEMP\VisualStudio.chman', `
         '--installChannelUri', 'C:\TEMP\VisualStudio.chman', `
         '--add', 'Microsoft.VisualStudio.Workload.VCTools', `
         '--add', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', `
         '--includeRecommended', `
-        '--installPath', $installPath) -Wait -PassThru; `
+        '--installPath', $installPath); `
+    $started = Get-Date; `
+    $p = Start-Process -FilePath 'C:\TEMP\vs_buildtools.exe' -ArgumentList $vsArgs -PassThru -NoWait; `
+    if (-not $p) { throw 'Start-Process did not return a process handle for vs_buildtools.exe' }; `
+    while (-not $p.HasExited) { `
+        Start-Sleep -Seconds 120; `
+        $min = [int]((Get-Date) - $started).TotalMinutes; `
+        Write-Host "[vs_buildtools] still running (~${min} min since start, PID $($p.Id))" `
+    }; `
+    $p.WaitForExit(); `
+    Write-Host "vs_buildtools.exe exited with code $($p.ExitCode)"; `
     if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "vs_buildtools.exe failed with exit $($p.ExitCode)" }
 
 # 2. Git (needed by Flutter)
