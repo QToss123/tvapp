@@ -1,0 +1,134 @@
+# Builds the Windows desktop app using Dockerfile.windows (Windows containers + Flutter in-image).
+# Requires Docker in Windows container mode. GitHub-hosted windows-latest often uses a Linux Docker
+# engine only — if the verify step fails, use a self-hosted Windows runner with Windows containers.
+
+name: Flutter Windows
+
+on:
+  push:
+    branches:
+      - main
+      - Merge_Android_Window_Linux
+  workflow_dispatch:
+    inputs:
+      backend_url:
+        description: BACKEND_URL (dart-define passed to flutter build)
+        type: string
+        default: ''
+      package_suffix:
+        description: PACKAGE_SUFFIX (e.g. _Dev or _Prod)
+        type: string
+        default: ''
+
+jobs:
+  build-windows-docker:
+    name: Build Windows (Dockerfile.windows)
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Switch Docker to Windows containers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $cli = Join-Path $env:ProgramFiles 'Docker\Docker\DockerCli.exe'
+          if (Test-Path $cli) {
+            & $cli -SwitchDaemon 2>&1 | Write-Host
+            Start-Sleep -Seconds 8
+          }
+
+      - name: Verify Docker Windows engine
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          docker version
+          $os = (docker info --format '{{.OSType}}').Trim()
+          if ($os -ne 'windows') {
+            Write-Error @"
+          Dockerfile.windows needs Windows containers (base image mcr.microsoft.com/windows/servercore).
+          This runner reports Docker OSType='$os'. Use Docker Desktop > Switch to Windows containers locally,
+          or a self-hosted Windows runner with Windows containers enabled. See Dockerfile.windows header comment.
+          "@
+            exit 1
+          }
+
+      - name: Set build arguments
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $backend = '${{ github.event.inputs.backend_url }}'
+            $suffix = '${{ github.event.inputs.package_suffix }}'
+          } else {
+            $backend = '${{ vars.WINDOWS_BACKEND_URL }}'
+            $suffix = '${{ vars.WINDOWS_PACKAGE_SUFFIX }}'
+          }
+          if ([string]::IsNullOrWhiteSpace($backend)) {
+            $backend = 'https://licenses.dbk.burlingtonenglish.in/'
+          }
+          if ([string]::IsNullOrWhiteSpace($suffix)) {
+            $suffix = '_Prod'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value "BACKEND_URL=$backend"
+          Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value "PACKAGE_SUFFIX=$suffix"
+          Write-Host "PACKAGE_SUFFIX=$suffix"
+          Write-Host "BACKEND_URL=$backend"
+
+      - name: Build image (Dockerfile.windows)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bookKey = '${{ secrets.WINDOWS_BOOK_KEY }}'
+          docker build -f Dockerfile.windows -t tv-app-books:windows-ci `
+            --build-arg "BACKEND_URL=$env:BACKEND_URL" `
+            --build-arg "BOOK_KEY=$bookKey" `
+            --build-arg "PACKAGE_SUFFIX=$env:PACKAGE_SUFFIX" `
+            .
+
+      - name: Copy Release output from image
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name = "win-art-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
+          docker create --name $name tv-app-books:windows-ci
+          try {
+            $folder = "windows-release$($env:PACKAGE_SUFFIX)"
+            $src = "C:/artifacts/$folder"
+            $dest = Join-Path $env:GITHUB_WORKSPACE 'artifact-extract'
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            docker cp "${name}:${src}" $dest
+            $extracted = Join-Path $dest $folder
+            if (-not (Test-Path $extracted)) {
+              Write-Error "Expected folder not found after docker cp: $extracted"
+              exit 1
+            }
+            $items = Get-ChildItem -LiteralPath $extracted -Force
+            if ($items.Count -eq 0) {
+              Write-Error "Extracted folder is empty: $extracted"
+              exit 1
+            }
+            Write-Host "Extracted $($items.Count) item(s) under $extracted"
+          } finally {
+            docker rm $name 2>$null
+          }
+
+      - name: Zip Windows build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $folder = "windows-release$($env:PACKAGE_SUFFIX)"
+          $extracted = Join-Path $env:GITHUB_WORKSPACE (Join-Path 'artifact-extract' $folder)
+          $zipPath = Join-Path $env:GITHUB_WORKSPACE 'windows-build.zip'
+          if (Test-Path $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+          Compress-Archive -Path (Join-Path $extracted '*') -DestinationPath $zipPath -Force
+          Write-Host "Created $zipPath"
+
+      - name: Upload Windows build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: windows-build.zip
+          if-no-files-found: error
