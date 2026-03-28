@@ -82,8 +82,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $bookKey = '${{ secrets.WINDOWS_BOOK_KEY }}'
-          Write-Host 'VS Build Tools install inside the image can take 30-90+ minutes; first long pause is usually step 6/23.'
-          docker build -m 4g -f Dockerfile.windows -t tv-app-books:windows-ci `
+          Write-Host 'VS Build Tools install inside the image can take 30-90+ minutes; step 6 logs a heartbeat every 2 min while the installer runs.'
+          # Windows container builds often reject or ignore docker build -m; raise Docker Desktop / host memory if installs fail.
+          docker build -f Dockerfile.windows -t tv-app-books:windows-ci `
             --build-arg "BACKEND_URL=$env:BACKEND_URL" `
             --build-arg "BOOK_KEY=$bookKey" `
             --build-arg "PACKAGE_SUFFIX=$env:PACKAGE_SUFFIX" `

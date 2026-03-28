@@ -10,32 +10,35 @@ SHELL ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command"]
 # Use the same install root as Microsoft’s container docs; a short path like C:\BuildTools often leaves
 # VC\Auxiliary\Build\vcvars64.bat missing while the workload reports success.
 #
-# This step routinely takes 30–90+ minutes: the bootstrapper runs with --quiet, so Docker logs look idle.
-# Build with enough RAM (e.g. docker build -m 4g); under-provisioned hosts can appear to hang or fail.
+# This step routinely takes 30–90+ minutes: --quiet hides installer UI/log; we poll the process and print a line every 2 min.
+# Under-provisioned hosts can appear to hang or fail; raise Docker/host memory (Windows builds often ignore docker build -m).
+# Use normal PowerShell $vars here; Windows docker build does not strip `$$` to `$` like Linux-oriented docs describe.
 ARG CHANNEL_URL=https://aka.ms/vs/17/release/channel
 ADD ${CHANNEL_URL} "C:\TEMP\VisualStudio.chman"
 ADD https://aka.ms/vs/17/release/vs_buildtools.exe "C:\TEMP\vs_buildtools.exe"
-RUN Write-Host 'Installing Visual Studio Build Tools (VCTools). Expect 30-90+ min; heartbeat lines every 2 min are normal.'; `
-    $installPath = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools'; `
-    $vsArgs = @( `
-        '--quiet', '--wait', '--norestart', '--nocache', `
-        '--channelUri', 'C:\TEMP\VisualStudio.chman', `
-        '--installChannelUri', 'C:\TEMP\VisualStudio.chman', `
-        '--add', 'Microsoft.VisualStudio.Workload.VCTools', `
-        '--add', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', `
-        '--includeRecommended', `
-        '--installPath', $installPath); `
+RUN $installPath = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools'; `
+    $psi = New-Object System.Diagnostics.ProcessStartInfo; `
+    $psi.FileName = 'C:\TEMP\vs_buildtools.exe'; `
+    $psi.UseShellExecute = $false; `
+    $psi.Arguments = '--quiet --wait --norestart --nocache --channelUri C:\TEMP\VisualStudio.chman --installChannelUri C:\TEMP\VisualStudio.chman --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --includeRecommended --installPath "' + $installPath + '"'; `
+    $proc = New-Object System.Diagnostics.Process; `
+    $proc.StartInfo = $psi; `
+    Write-Host 'Installing Visual Studio Build Tools (VCTools). Heartbeat every 2 min until vs_buildtools.exe exits.'; `
     $started = Get-Date; `
-    $p = Start-Process -FilePath 'C:\TEMP\vs_buildtools.exe' -ArgumentList $vsArgs -PassThru -NoWait; `
-    if (-not $p) { throw 'Start-Process did not return a process handle for vs_buildtools.exe' }; `
-    while (-not $p.HasExited) { `
+    [void]$proc.Start(); `
+    while (-not $proc.HasExited) { `
         Start-Sleep -Seconds 120; `
-        $min = [int]((Get-Date) - $started).TotalMinutes; `
-        Write-Host "[vs_buildtools] still running (~${min} min since start, PID $($p.Id))" `
+        try { $proc.Refresh() } catch { }; `
+        $min = [int](((Get-Date) - $started).TotalMinutes); `
+        Write-Host ('[vs_buildtools] still running (~' + $min + ' min since start, PID ' + $proc.Id + ')') `
     }; `
-    $p.WaitForExit(); `
-    Write-Host "vs_buildtools.exe exited with code $($p.ExitCode)"; `
-    if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "vs_buildtools.exe failed with exit $($p.ExitCode)" }
+    $proc.WaitForExit(); `
+    $exit = $proc.ExitCode; `
+    Write-Host ('vs_buildtools.exe exited with code ' + $exit); `
+    if ($exit -ne 0 -and $exit -ne 3010) { throw ('vs_buildtools.exe failed with exit ' + $exit) }; `
+    $devCmd = Join-Path $installPath 'Common7\Tools\VsDevCmd.bat'; `
+    if (-not (Test-Path -LiteralPath $devCmd)) { throw "VS install reported success but missing: $devCmd" }; `
+    Write-Host 'Verified VsDevCmd.bat present.'
 
 # 2. Git (needed by Flutter)
 RUN Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.47.0.windows.1/Git-2.47.0-64-bit.exe' -OutFile C:\TEMP\git.exe -UseBasicParsing; `
@@ -70,17 +73,30 @@ ARG BACKEND_URL
 ARG BOOK_KEY
 ARG PACKAGE_SUFFIX
 
-# Flutter needs MSVC/CMake/ninja on PATH; VsDevCmd sets them for this cmd session (same install root as above).
-SHELL ["cmd", "/S", "/C"]
-RUN call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 && `
-    set "PATH=C:\flutter\bin;C:\Program Files\Git\cmd;C:\Program Files\Git\bin;%PATH%" && `
-    cd /d C:\app && `
-    flutter build windows --release `
-    --dart-define=BACKEND_URL=%BACKEND_URL% `
-    --dart-define=BOOK_KEY=%BOOK_KEY% `
-    --dart-define=PACKAGE_SUFFIX=%PACKAGE_SUFFIX%
-
-SHELL ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command"]
+# One-line cmd /S /C often breaks on paths containing (x86): "The system cannot find the path specified".
+# Emit a small .cmd file (call + quoted path works reliably) and resolve install root via vswhere when present.
+RUN $ErrorActionPreference = 'Stop'; `
+    $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)'); `
+    $vswhere = Join-Path $pf86 'Microsoft Visual Studio\Installer\vswhere.exe'; `
+    $vsRoot = $null; `
+    if (Test-Path -LiteralPath $vswhere) { `
+        $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null | Select-Object -First 1; `
+        if ($vsRoot) { $vsRoot = $vsRoot.Trim() } `
+    }; `
+    if ([string]::IsNullOrWhiteSpace($vsRoot)) { $vsRoot = Join-Path $pf86 'Microsoft Visual Studio\2022\BuildTools' }; `
+    $devCmd = Join-Path $vsRoot 'Common7\Tools\VsDevCmd.bat'; `
+    $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'; `
+    if (Test-Path -LiteralPath $devCmd) { `
+        $callLine = 'call "' + $devCmd.Replace('"', '""') + '" -arch=amd64 -host_arch=amd64' `
+    } elseif (Test-Path -LiteralPath $vcvars) { `
+        $callLine = 'call "' + $vcvars.Replace('"', '""') + '"' `
+    } else { `
+        throw "Neither VsDevCmd.bat nor VC\Auxiliary\Build\vcvars64.bat under $vsRoot" `
+    }; `
+    $script = @('@echo off', $callLine, 'set "PATH=C:\flutter\bin;C:\Program Files\Git\cmd;C:\Program Files\Git\bin;%PATH%"', 'cd /d C:\app', 'flutter build windows --release --dart-define=BACKEND_URL=%BACKEND_URL% --dart-define=BOOK_KEY=%BOOK_KEY% --dart-define=PACKAGE_SUFFIX=%PACKAGE_SUFFIX%') -join "`r`n"; `
+    Set-Content -LiteralPath C:\build-flutter.cmd -Value $script -Encoding Oem; `
+    & cmd.exe /c 'C:\build-flutter.cmd'; `
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Persist suffix for next step (ARG is not reliably exposed as $env: in all Windows Docker builds)
 ENV PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
