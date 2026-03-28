@@ -33,6 +33,23 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Docker: files copied out of images (e.g. scripts/docker_linux_extract.sh)
+docker-artifacts/
+
+# Linux desktop: symlinks recreated by flutter pub get; point at machine-specific pub-cache
+linux/flutter/ephemeral/.plugin_symlinks/
+
+# Local secrets / env (do not commit)
+.env
+.env.local
+.env.*.local
+
+# Local scratch
+build_log.txt
+
+# Stray installers at repo root (packages normally under build/ or docker-artifacts/)
+/*.deb
+
 # Symbolication related
 app.*.symbols
 
