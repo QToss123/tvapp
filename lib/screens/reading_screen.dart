@@ -16,6 +16,7 @@ import '../services/database_service.dart';
 import '../services/book_decryption_service.dart';
 import '../services/book_server_isolate.dart' as isolate_runner;
 import '../services/video_predecrypt_service.dart';
+import '../services/web_launcher_service.dart';
 import '../utils/decrypt_util.dart';
 
 /// Intent for TV remote key directions
@@ -57,8 +58,12 @@ class _ReadingScreenState extends State<ReadingScreen> {
   Isolate? _serverIsolate;
   SendPort? _serverIsolateSendPort;
   final FocusNode _webViewFocusNode = FocusNode();
-  /// Linux fallback: HTTP URL to retry if file:// fails
+  /// Linux fallback: HTTP URL to retry if file:// fails (Windows WebView only).
   String? _linuxHttpFallbackUrl;
+  /// Linux: book opened in system browser; no in-app WebView for content.
+  bool _openedExternallyOnLinux = false;
+  /// Linux: last URL passed to [WebLauncherService.openWebContent] (local server or remote).
+  String? _lastOpenedBookUrl;
   String? _decryptedCachePath;
   /// Extracted dir to delete on dispose when using unzip-first + decrypt-on-serve (memory optimization).
   String? _extractedDirPathForCleanup;
@@ -91,7 +96,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     // Request focus for TV cursor (Android) or keyboard scroll (Linux/Windows)
-    if (!_isLoading && _error == null && (_useTvCursor || Platform.isLinux || Platform.isWindows)) {
+    if (!_isLoading &&
+        _error == null &&
+        (_useTvCursor || Platform.isWindows || (Platform.isLinux && _controller != null))) {
       _requestWebViewFocus();
     }
   }
@@ -561,6 +568,23 @@ class _ReadingScreenState extends State<ReadingScreen> {
   /// WebView controller is created once in initState and reused for the whole screen lifetime.
   /// Never create a new controller in build() to avoid recreating the platform WebView and losing state/memory.
   void _initializeWebView() {
+    if (Platform.isLinux) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        try {
+          _startLoadingContent();
+        } catch (e) {
+          if (mounted) {
+            setState(() {
+              _error = 'Couldn’t open this book. Please try again.';
+              _isLoading = false;
+            });
+          }
+        }
+      });
+      return;
+    }
+
     try {
       final c = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -667,9 +691,10 @@ class _ReadingScreenState extends State<ReadingScreen> {
 
   void _startLoadingContent() {
     final c = _controller;
-    if (c == null) return;
+    final linuxNoWebView = Platform.isLinux && c == null;
+    if (c == null && !linuxNoWebView) return;
     if (widget.book.contentUrl == null || widget.book.contentUrl!.isEmpty) {
-      c.loadRequest(Uri.parse('about:blank'));
+      c?.loadRequest(Uri.parse('about:blank'));
       setState(() {
         _isLoading = false;
         _error = 'This book isn’t downloaded yet. Go to Sync to download it first.';
@@ -679,17 +704,61 @@ class _ReadingScreenState extends State<ReadingScreen> {
     final originalUrl = widget.book.contentUrl!;
     final contentUrl = _normalizeContentUrl(originalUrl);
     if (contentUrl.startsWith('assets/')) {
+      if (linuxNoWebView) {
+        setState(() {
+          _isLoading = false;
+          _error = 'This book can’t be opened in the browser.';
+        });
+        return;
+      }
       _loadAsset(contentUrl);
     } else if (contentUrl.startsWith('file://')) {
       _loadFile(contentUrl);
     } else if (contentUrl.startsWith('http://') || contentUrl.startsWith('https://')) {
-      c.loadRequest(Uri.parse(contentUrl));
+      if (linuxNoWebView) {
+        unawaited(_openRemoteUrlInLinuxBrowser(contentUrl));
+        return;
+      }
+      _controller!.loadRequest(Uri.parse(contentUrl));
     } else if (_looksLikeLocalPath(contentUrl)) {
       // Raw path (e.g. C:\path on Windows or /path) — treat as file
       final fileUrl = contentUrl.contains('://') ? contentUrl : 'file:///${contentUrl.replaceAll(r'\', '/')}';
       _loadFile(fileUrl);
     } else {
+      if (linuxNoWebView) {
+        setState(() {
+          _isLoading = false;
+          _error = 'This book can’t be opened in the browser.';
+        });
+        return;
+      }
       _loadAsset(contentUrl);
+    }
+  }
+
+  Future<void> _openRemoteUrlInLinuxBrowser(String url) async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _error = null;
+      _loadingMessage = 'loading';
+    });
+    final ok = await WebLauncherService.openWebContent(url);
+    if (!mounted) return;
+    if (ok) {
+      _lastOpenedBookUrl = url;
+      setState(() {
+        _openedExternallyOnLinux = true;
+        _isLoading = false;
+        _loadingMessage = null;
+      });
+    } else {
+      setState(() {
+        _isLoading = false;
+        _loadingMessage = null;
+        _error =
+            'Could not open browser. Check that a default browser is installed.';
+      });
     }
   }
 
@@ -831,7 +900,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
     if (mounted && _controller != null) {
       if (Platform.isAndroid) {
         _controller!.loadRequest(Uri.parse('about:blank'));
-      } else {
+      } else if (!Platform.isLinux) {
         final openingText = 'Opening book...';
         _controller!.loadHtmlString(
           '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
@@ -1005,6 +1074,28 @@ class _ReadingScreenState extends State<ReadingScreen> {
       final urlPath = relativePath.replaceAll('\\', '/');
       final httpUrl = 'http://127.0.0.1:$_serverPort/$urlPath';
 
+      if (Platform.isLinux) {
+        _lastOpenedBookUrl = httpUrl;
+        final launched = await WebLauncherService.openWebContent(httpUrl);
+        if (!mounted) return;
+        if (!launched) {
+          await _stopLocalServer();
+          setState(() {
+            _isLoading = false;
+            _error =
+                'Could not open browser. Install a default browser or try again.';
+            _loadingMessage = null;
+          });
+          return;
+        }
+        setState(() {
+          _openedExternallyOnLinux = true;
+          _isLoading = false;
+          _loadingMessage = null;
+        });
+        return;
+      }
+
       // Book is always loaded from a URL (local HTTP or file://), never from in-memory HTML.
       // This keeps the flipbook and its 1000+ assets streamed from disk/server instead of buffered in Dart.
       String bookUrl;
@@ -1012,7 +1103,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         // Encrypted entries: must use HTTP so every request is decrypted on serve
         _linuxHttpFallbackUrl = null;
         bookUrl = httpUrl;
-      } else if (Platform.isLinux || Platform.isWindows) {
+      } else if (Platform.isWindows) {
         // Desktop: try file:// first so WebView doesn't hit localhost restrictions. Fallback to HTTP if it fails.
         bookUrl = Uri.file(indexHtmlPath).toString();
         _linuxHttpFallbackUrl = httpUrl;
@@ -1021,7 +1112,7 @@ class _ReadingScreenState extends State<ReadingScreen> {
         bookUrl = httpUrl;
       }
 
-      if (Platform.isLinux || Platform.isWindows) {
+      if (Platform.isWindows) {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted) return;
           _controller?.loadRequest(Uri.parse(bookUrl));
@@ -1721,8 +1812,9 @@ class _ReadingScreenState extends State<ReadingScreen> {
   }
 
   Future<void> _performBack() async {
-    try {
-      await _controller?.runJavaScript('''
+    if (_controller != null) {
+      try {
+        await _controller?.runJavaScript('''
         (function(){
           try {
             var el = document.querySelectorAll("audio, video");
@@ -1735,12 +1827,15 @@ class _ReadingScreenState extends State<ReadingScreen> {
           } catch(e) {}
         })();
       ''');
-    } catch (_) { /* ignore */ }
-    await Future.delayed(const Duration(milliseconds: 150));
-    try {
-      await _controller?.loadRequest(Uri.parse('about:blank'));
-    } catch (_) { /* ignore */ }
-    await Future.delayed(const Duration(milliseconds: 600));
+      } catch (_) { /* ignore */ }
+      await Future.delayed(const Duration(milliseconds: 150));
+      try {
+        await _controller?.loadRequest(Uri.parse('about:blank'));
+      } catch (_) { /* ignore */ }
+      await Future.delayed(const Duration(milliseconds: 600));
+    } else {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
     if (!mounted) return;
     Navigator.of(context).pop();
   }
@@ -1801,12 +1896,26 @@ class _ReadingScreenState extends State<ReadingScreen> {
                     const SizedBox(height: 24),
                     ElevatedButton.icon(
                       onPressed: () {
-                        if (widget.book.contentUrl != null &&
-                            widget.book.contentUrl!.isNotEmpty) {
-                          setState(() => _error = null);
-                          _controller?.reload();
-                        } else {
+                        if (widget.book.contentUrl == null ||
+                            widget.book.contentUrl!.isEmpty) {
                           Navigator.maybePop(context);
+                          return;
+                        }
+                        setState(() {
+                          _error = null;
+                          _openedExternallyOnLinux = false;
+                          _lastOpenedBookUrl = null;
+                        });
+                        if (Platform.isLinux && _controller == null) {
+                          setState(() {
+                            _isLoading = true;
+                            _loadingMessage = 'opening';
+                          });
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) _startLoadingContent();
+                          });
+                        } else {
+                          _controller?.reload();
                         }
                       },
                       icon: Icon(
@@ -1823,6 +1932,56 @@ class _ReadingScreenState extends State<ReadingScreen> {
                       ),
                     ),
                   ],
+                ),
+              )
+            else if (_openedExternallyOnLinux && _error == null)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.open_in_browser,
+                          size: 64, color: Colors.grey.shade700),
+                      const SizedBox(height: 20),
+                      Text(
+                        'Book opened in your browser',
+                        style: Theme.of(context).textTheme.titleLarge,
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Keep this app open while you read. Closing this screen stops the local server and the book tab may stop loading.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Colors.grey.shade700,
+                            ),
+                        textAlign: TextAlign.center,
+                      ),
+                      if (_lastOpenedBookUrl != null) ...[
+                        const SizedBox(height: 24),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final messenger = ScaffoldMessenger.of(context);
+                            final url = _lastOpenedBookUrl;
+                            if (url == null) return;
+                            final ok =
+                                await WebLauncherService.openWebContent(url);
+                            if (!mounted) return;
+                            if (!ok) {
+                              messenger.showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      'Could not open browser again.'),
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Open in browser again'),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               )
             else if (_controller != null)

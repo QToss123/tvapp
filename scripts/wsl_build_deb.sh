@@ -1,6 +1,9 @@
-#!/bin/bash
-set -e
-cd /mnt/c/Users/meena/Desktop/git/tv_app_books
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_DIR"
 # Install Flutter if missing (to home dir of current user)
 if ! command -v flutter &>/dev/null; then
   FLUTTER_DIR="${HOME}/flutter"
@@ -8,7 +11,7 @@ if ! command -v flutter &>/dev/null; then
     echo ">>> Installing Flutter in WSL..."
     mkdir -p "$HOME" && cd "$HOME"
     git clone https://github.com/flutter/flutter.git -b stable --depth 1
-    cd /mnt/c/Users/meena/Desktop/git/tv_app_books
+    cd "$PROJECT_DIR"
   fi
   export PATH="$FLUTTER_DIR/bin:$PATH"
 fi

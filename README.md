@@ -1,5 +1,13 @@
 # liqvid-frontend-app
 
+## Quick Release Builds
+
+Use the release matrix doc for this branch:
+
+- `docs/release-build-matrix.md`
+- Unified Linux-host build for APK + DEB: `bash scripts/build_unified_release.sh`
+- Windows-host release build: `powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1`
+
 
 
 ## Getting started

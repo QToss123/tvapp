@@ -4,6 +4,7 @@ include :
     file: app-template.gitlab-ci.yml
 
 variables:
+  DOCKER_BUILDKIT: "1"
   DEV_BACKEND_URL: "https://licenses.dbk.dev.burlingtonenglish.in/"
   DEV_BOOK_KEY: $DEV_BOOK_CI_KEY
   DEV_PACKAGE_SUFFIX: "_Dev"
@@ -20,7 +21,7 @@ package-linux-dev:
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.linux'
-    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$DEV_BACKEND_URL --build-arg BOOK_KEY=$DEV_BOOK_KEY --build-arg PACKAGE_SUFFIX=$DEV_PACKAGE_SUFFIX'
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$DEV_BACKEND_URL --build-arg BUILD_ENV=Dev --secret id=book_key,env=DEV_BOOK_CI_KEY'
   when: manual  
 
 package-android-dev:
@@ -63,7 +64,7 @@ package-linux-prod:
   extends: .package
   variables: 
     DOCKER_FILE: 'Dockerfile.linux'
-    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$PROD_BACKEND_URL --build-arg BOOK_KEY=$PROD_BOOK_KEY --build-arg PACKAGE_SUFFIX=$PROD_PACKAGE_SUFFIX'
+    DOCKER_BUILD_OPTIONS: '--build-arg BACKEND_URL=$PROD_BACKEND_URL --build-arg BUILD_ENV=Prod --secret id=book_key,env=PROD_BOOK_CI_KEY'
   when: manual  
 
 package-android-prod:
