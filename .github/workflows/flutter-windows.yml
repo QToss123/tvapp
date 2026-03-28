@@ -1,3 +1,13 @@
+# Flutter Windows release build (native `flutter build windows`, not Dockerfile.windows).
+#
+# Configure in GitHub: Settings → Secrets and variables → Actions
+#
+# | What | How |
+# |------|-----|
+# | URL | Manual run: workflow input `backend_url`. On push / non-dispatch: repository variable `WINDOWS_BACKEND_URL`. If still empty, defaults to `https://licenses.dbk.burlingtonenglish.in/`. |
+# | Env | Manual run: input `build_env` (`Dev` or `Prod`). On push / non-dispatch: variable `WINDOWS_BUILD_ENV`. If empty, defaults to `Prod`. |
+# | Key | Repository secret `WINDOWS_BOOK_KEY` → passed as dart-define `BOOK_KEY`. |
+
 name: Flutter Windows Build
 
 on:
@@ -8,11 +18,11 @@ on:
   workflow_dispatch:
     inputs:
       backend_url:
-        description: BACKEND_URL (dart-define)
+        description: BACKEND_URL (dart-define). Leave empty to use WINDOWS_BACKEND_URL or the default prod URL below.
         required: false
         default: ''
       build_env:
-        description: BUILD_ENV (Dev or Prod)
+        description: BUILD_ENV — Dev or Prod (sets PACKAGE_SUFFIX=_Dev / _Prod)
         required: false
         default: 'Prod'
 
@@ -25,18 +35,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Install Flutter
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
 
-      # Enable Windows desktop
       - name: Enable Windows Desktop
         run: flutter config --enable-windows-desktop
 
-      # Set environment variables
-      - name: Set build variables
+      - name: Set build variables (URL, BUILD_ENV)
         shell: pwsh
         run: |
           if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
@@ -55,17 +62,15 @@ jobs:
             $buildEnv = 'Prod'
           }
 
-          echo "BACKEND_URL=$backend" >> $env:GITHUB_ENV
-          echo "BUILD_ENV=$buildEnv" >> $env:GITHUB_ENV
+          Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value "BACKEND_URL=$backend"
+          Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value "BUILD_ENV=$buildEnv"
 
           Write-Host "Using BACKEND_URL=$backend"
           Write-Host "Using BUILD_ENV=$buildEnv"
 
-      # Install dependencies
       - name: Get dependencies
         run: flutter pub get
 
-      # Build Windows app
       - name: Build Windows app
         run: |
           flutter build windows --release `
@@ -74,7 +79,6 @@ jobs:
             --dart-define=PACKAGE_SUFFIX=_$env:BUILD_ENV `
             --dart-define=BOOK_KEY=${{ secrets.WINDOWS_BOOK_KEY }}
 
-      # Prepare artifact folder
       - name: Prepare artifact
         shell: pwsh
         run: |
@@ -85,14 +89,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           Copy-Item -Recurse -Force "$src\*" $dest
 
-      # Zip build
       - name: Zip artifact
         shell: pwsh
         run: |
           $folder = "windows-release_$env:BUILD_ENV"
           Compress-Archive -Path "$folder\*" -DestinationPath "windows-build.zip" -Force
 
-      # Upload artifact
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
