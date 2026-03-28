@@ -1,8 +1,4 @@
-# Builds the Windows desktop app using Dockerfile.windows (Windows containers + Flutter in-image).
-# Requires Docker in Windows container mode. GitHub-hosted windows-latest often uses a Linux Docker
-# engine only — if the verify step fails, use a self-hosted Windows runner with Windows containers.
-
-name: Flutter Windows
+name: Flutter Windows Build
 
 on:
   push:
@@ -12,129 +8,92 @@ on:
   workflow_dispatch:
     inputs:
       backend_url:
-        description: BACKEND_URL (dart-define passed to flutter build)
-        type: string
+        description: BACKEND_URL (dart-define)
+        required: false
         default: ''
       build_env:
-        description: BUILD_ENV (Dev or Prod) — same as Dockerfile.linux / Dockerfile.android
-        type: string
+        description: BUILD_ENV (Dev or Prod)
+        required: false
         default: 'Prod'
 
 jobs:
-  build-windows-docker:
-    name: Build Windows (Dockerfile.windows)
+  build-windows:
     runs-on: windows-latest
-    timeout-minutes: 360
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Switch Docker to Windows containers
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Continue'
-          $cli = Join-Path $env:ProgramFiles 'Docker\Docker\DockerCli.exe'
-          if (Test-Path $cli) {
-            & $cli -SwitchDaemon 2>&1 | Write-Host
-            Start-Sleep -Seconds 8
-          }
+      # Install Flutter
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
 
-      - name: Verify Docker Windows engine
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          docker version
-          $os = (docker info --format '{{.OSType}}').Trim()
-          if ($os -ne 'windows') {
-            Write-Error @"
-          Dockerfile.windows needs Windows containers (base image mcr.microsoft.com/windows/servercore).
-          This runner reports Docker OSType='$os'. Use Docker Desktop > Switch to Windows containers locally,
-          or a self-hosted Windows runner with Windows containers enabled. See Dockerfile.windows header comment.
-          "@
-            exit 1
-          }
+      # Enable Windows desktop
+      - name: Enable Windows Desktop
+        run: flutter config --enable-windows-desktop
 
-      - name: Set build arguments
+      # Set environment variables
+      - name: Set build variables
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
             $backend = '${{ github.event.inputs.backend_url }}'
             $buildEnv = '${{ github.event.inputs.build_env }}'
           } else {
             $backend = '${{ vars.WINDOWS_BACKEND_URL }}'
             $buildEnv = '${{ vars.WINDOWS_BUILD_ENV }}'
-            if ([string]::IsNullOrWhiteSpace($buildEnv)) {
-              $legacy = '${{ vars.WINDOWS_PACKAGE_SUFFIX }}'
-              if ($legacy -eq '_Dev') { $buildEnv = 'Dev' }
-              elseif ($legacy -eq '_Prod') { $buildEnv = 'Prod' }
-              else { $buildEnv = 'Prod' }
-            }
           }
+
           if ([string]::IsNullOrWhiteSpace($backend)) {
             $backend = 'https://licenses.dbk.burlingtonenglish.in/'
           }
+
           if ([string]::IsNullOrWhiteSpace($buildEnv)) {
             $buildEnv = 'Prod'
           }
-          Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value "BACKEND_URL=$backend"
-          Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value "BUILD_ENV=$buildEnv"
-          Write-Host "BUILD_ENV=$buildEnv"
-          Write-Host "BACKEND_URL=$backend"
 
-      - name: Build image (Dockerfile.windows)
+          echo "BACKEND_URL=$backend" >> $env:GITHUB_ENV
+          echo "BUILD_ENV=$buildEnv" >> $env:GITHUB_ENV
+
+          Write-Host "Using BACKEND_URL=$backend"
+          Write-Host "Using BUILD_ENV=$buildEnv"
+
+      # Install dependencies
+      - name: Get dependencies
+        run: flutter pub get
+
+      # Build Windows app
+      - name: Build Windows app
+        run: |
+          flutter build windows --release `
+            --dart-define=BACKEND_URL=$env:BACKEND_URL `
+            --dart-define=BUILD_ENV=$env:BUILD_ENV `
+            --dart-define=PACKAGE_SUFFIX=_$env:BUILD_ENV `
+            --dart-define=BOOK_KEY=${{ secrets.WINDOWS_BOOK_KEY }}
+
+      # Prepare artifact folder
+      - name: Prepare artifact
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $bookKey = '${{ secrets.WINDOWS_BOOK_KEY }}'
-          Write-Host 'VS Build Tools install inside the image can take 30-90+ minutes; step 6 logs a heartbeat every 2 min while the installer runs.'
-          # Windows container builds often reject or ignore docker build -m; raise Docker Desktop / host memory if installs fail.
-          docker build -f Dockerfile.windows -t tv-app-books:windows-ci `
-            --build-arg "BACKEND_URL=$env:BACKEND_URL" `
-            --build-arg "BOOK_KEY=$bookKey" `
-            --build-arg "BUILD_ENV=$env:BUILD_ENV" `
-            .
+          $folder = "windows-release_$env:BUILD_ENV"
+          $src = "build/windows/x64/runner/Release"
+          $dest = "$env:GITHUB_WORKSPACE\$folder"
 
-      - name: Copy Release output from image
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Copy-Item -Recurse -Force "$src\*" $dest
+
+      # Zip build
+      - name: Zip artifact
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $name = "win-art-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
-          docker create --name $name tv-app-books:windows-ci
-          try {
-            $folder = "windows-release_$($env:BUILD_ENV)"
-            $src = "C:/artifacts/$folder"
-            $dest = Join-Path $env:GITHUB_WORKSPACE 'artifact-extract'
-            New-Item -ItemType Directory -Force -Path $dest | Out-Null
-            docker cp "${name}:${src}" $dest
-            $extracted = Join-Path $dest $folder
-            if (-not (Test-Path $extracted)) {
-              Write-Error "Expected folder not found after docker cp: $extracted"
-              exit 1
-            }
-            $items = Get-ChildItem -LiteralPath $extracted -Force
-            if ($items.Count -eq 0) {
-              Write-Error "Extracted folder is empty: $extracted"
-              exit 1
-            }
-            Write-Host "Extracted $($items.Count) item(s) under $extracted"
-          } finally {
-            docker rm $name 2>$null
-          }
+          $folder = "windows-release_$env:BUILD_ENV"
+          Compress-Archive -Path "$folder\*" -DestinationPath "windows-build.zip" -Force
 
-      - name: Zip Windows build
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $folder = "windows-release_$($env:BUILD_ENV)"
-          $extracted = Join-Path $env:GITHUB_WORKSPACE (Join-Path 'artifact-extract' $folder)
-          $zipPath = Join-Path $env:GITHUB_WORKSPACE 'windows-build.zip'
-          if (Test-Path $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-          Compress-Archive -Path (Join-Path $extracted '*') -DestinationPath $zipPath -Force
-          Write-Host "Created $zipPath"
-
-      - name: Upload Windows build artifact
+      # Upload artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
