@@ -1,5 +1,4 @@
-# syntax=docker/dockerfile:1.4
-# Pass target platform at build time when needed, e.g. ARM hosts: docker build --platform linux/amd64 ...
+# Optional on ARM hosts: docker build --platform linux/amd64 ...
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -41,27 +40,20 @@ COPY . .
 # recreates symlinks inside this image (see linux/flutter/ephemeral/.plugin_symlinks).
 RUN rm -rf linux/flutter/ephemeral/.plugin_symlinks && flutter pub get
 
-# Dev or Prod — controls artifact names: app-release_${BUILD_ENV}.deb and linux-bundle_${BUILD_ENV}/
-# Dart defines still use underscore prefix (e.g. _Dev, _Prod) for PACKAGE_SUFFIX compatibility.
+# Same build-args as Dockerfile.android / Dockerfile.windows (pass from CI).
 ARG BUILD_ENV=Dev
 ARG BACKEND_URL=
-
-# BOOK_KEY via BuildKit secret (not ARG) — avoids storing credentials in image build history.
-# Omit --secret for an empty key, or use:
-#   --secret id=book_key,env=MY_VAR
-#   --secret id=book_key,src=./path/to/keyfile
-RUN --mount=type=secret,id=book_key,required=false \
-    BK="$(cat /run/secrets/book_key 2>/dev/null || true)" && \
-    flutter build linux --release \
-      --dart-define=BACKEND_URL="${BACKEND_URL}" \
-      --dart-define=BOOK_KEY="$BK" \
-      --dart-define=PACKAGE_SUFFIX=_${BUILD_ENV} \
-      --dart-define=BUILD_ENV=${BUILD_ENV}
-
-# 6. Package as .deb and copy to /artifacts (uses BUILD_ENV from above)
+ARG BOOK_KEY=
 ARG APP_NAME=tv-app-books
 ARG APP_VERSION=1.0.0
 
+RUN flutter build linux --release \
+    --dart-define=BACKEND_URL="${BACKEND_URL}" \
+    --dart-define=BOOK_KEY="${BOOK_KEY}" \
+    --dart-define=PACKAGE_SUFFIX=_${BUILD_ENV} \
+    --dart-define=BUILD_ENV=${BUILD_ENV}
+
+# 6. Package as .deb and copy to /artifacts
 RUN DEB_DIR=/tmp/${APP_NAME}_${APP_VERSION}_amd64 && \
     mkdir -p ${DEB_DIR}/opt/${APP_NAME} && \
     mkdir -p ${DEB_DIR}/usr/share/applications && \

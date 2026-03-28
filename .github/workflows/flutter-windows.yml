@@ -15,10 +15,10 @@ on:
         description: BACKEND_URL (dart-define passed to flutter build)
         type: string
         default: ''
-      package_suffix:
-        description: PACKAGE_SUFFIX (e.g. _Dev or _Prod)
+      build_env:
+        description: BUILD_ENV (Dev or Prod) — same as Dockerfile.linux / Dockerfile.android
         type: string
-        default: ''
+        default: 'Prod'
 
 jobs:
   build-windows-docker:
@@ -61,20 +61,26 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
             $backend = '${{ github.event.inputs.backend_url }}'
-            $suffix = '${{ github.event.inputs.package_suffix }}'
+            $buildEnv = '${{ github.event.inputs.build_env }}'
           } else {
             $backend = '${{ vars.WINDOWS_BACKEND_URL }}'
-            $suffix = '${{ vars.WINDOWS_PACKAGE_SUFFIX }}'
+            $buildEnv = '${{ vars.WINDOWS_BUILD_ENV }}'
+            if ([string]::IsNullOrWhiteSpace($buildEnv)) {
+              $legacy = '${{ vars.WINDOWS_PACKAGE_SUFFIX }}'
+              if ($legacy -eq '_Dev') { $buildEnv = 'Dev' }
+              elseif ($legacy -eq '_Prod') { $buildEnv = 'Prod' }
+              else { $buildEnv = 'Prod' }
+            }
           }
           if ([string]::IsNullOrWhiteSpace($backend)) {
             $backend = 'https://licenses.dbk.burlingtonenglish.in/'
           }
-          if ([string]::IsNullOrWhiteSpace($suffix)) {
-            $suffix = '_Prod'
+          if ([string]::IsNullOrWhiteSpace($buildEnv)) {
+            $buildEnv = 'Prod'
           }
           Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value "BACKEND_URL=$backend"
-          Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value "PACKAGE_SUFFIX=$suffix"
-          Write-Host "PACKAGE_SUFFIX=$suffix"
+          Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value "BUILD_ENV=$buildEnv"
+          Write-Host "BUILD_ENV=$buildEnv"
           Write-Host "BACKEND_URL=$backend"
 
       - name: Build image (Dockerfile.windows)
@@ -87,7 +93,7 @@ jobs:
           docker build -f Dockerfile.windows -t tv-app-books:windows-ci `
             --build-arg "BACKEND_URL=$env:BACKEND_URL" `
             --build-arg "BOOK_KEY=$bookKey" `
-            --build-arg "PACKAGE_SUFFIX=$env:PACKAGE_SUFFIX" `
+            --build-arg "BUILD_ENV=$env:BUILD_ENV" `
             .
 
       - name: Copy Release output from image
@@ -97,7 +103,7 @@ jobs:
           $name = "win-art-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
           docker create --name $name tv-app-books:windows-ci
           try {
-            $folder = "windows-release$($env:PACKAGE_SUFFIX)"
+            $folder = "windows-release_$($env:BUILD_ENV)"
             $src = "C:/artifacts/$folder"
             $dest = Join-Path $env:GITHUB_WORKSPACE 'artifact-extract'
             New-Item -ItemType Directory -Force -Path $dest | Out-Null
@@ -121,7 +127,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $folder = "windows-release$($env:PACKAGE_SUFFIX)"
+          $folder = "windows-release_$($env:BUILD_ENV)"
           $extracted = Join-Path $env:GITHUB_WORKSPACE (Join-Path 'artifact-extract' $folder)
           $zipPath = Join-Path $env:GITHUB_WORKSPACE 'windows-build.zip'
           if (Test-Path $zipPath) { Remove-Item -LiteralPath $zipPath -Force }

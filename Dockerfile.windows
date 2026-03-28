@@ -1,6 +1,6 @@
 # escape=`
 # Requires: Docker with Windows containers on a Windows host (cannot build on Mac/Linux).
-# Build: docker build -f Dockerfile.windows -t app-windows --build-arg BACKEND_URL=... --build-arg BOOK_KEY=... --build-arg PACKAGE_SUFFIX=_Dev .
+# Build: docker build -f Dockerfile.windows -t app-windows --build-arg BACKEND_URL=... --build-arg BOOK_KEY=... --build-arg BUILD_ENV=Dev .
 
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
@@ -69,9 +69,15 @@ RUN flutter pub get
 
 COPY . .
 
-ARG BACKEND_URL
-ARG BOOK_KEY
-ARG PACKAGE_SUFFIX
+# Same build-args as Dockerfile.linux / Dockerfile.android (pass from CI).
+ARG BUILD_ENV=Dev
+ARG BACKEND_URL=
+ARG BOOK_KEY=
+
+ENV BACKEND_URL=${BACKEND_URL}
+ENV BOOK_KEY=${BOOK_KEY}
+ENV BUILD_ENV=${BUILD_ENV}
+ENV PACKAGE_SUFFIX=_${BUILD_ENV}
 
 # One-line cmd /S /C often breaks on paths containing (x86): "The system cannot find the path specified".
 # Emit a small .cmd file (call + quoted path works reliably) and resolve install root via vswhere when present.
@@ -93,14 +99,12 @@ RUN $ErrorActionPreference = 'Stop'; `
     } else { `
         throw "Neither VsDevCmd.bat nor VC\Auxiliary\Build\vcvars64.bat under $vsRoot" `
     }; `
-    $script = @('@echo off', $callLine, 'set "PATH=C:\flutter\bin;C:\Program Files\Git\cmd;C:\Program Files\Git\bin;%PATH%"', 'cd /d C:\app', 'flutter build windows --release --dart-define=BACKEND_URL=%BACKEND_URL% --dart-define=BOOK_KEY=%BOOK_KEY% --dart-define=PACKAGE_SUFFIX=%PACKAGE_SUFFIX%') -join "`r`n"; `
+    $script = @('@echo off', $callLine, 'set "PATH=C:\flutter\bin;C:\Program Files\Git\cmd;C:\Program Files\Git\bin;%PATH%"', 'cd /d C:\app', 'flutter build windows --release --dart-define=BACKEND_URL=%BACKEND_URL% --dart-define=BOOK_KEY=%BOOK_KEY% --dart-define=PACKAGE_SUFFIX=%PACKAGE_SUFFIX% --dart-define=BUILD_ENV=%BUILD_ENV%') -join "`r`n"; `
     Set-Content -LiteralPath C:\build-flutter.cmd -Value $script -Encoding Oem; `
     & cmd.exe /c 'C:\build-flutter.cmd'; `
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# Persist suffix for next step (ARG is not reliably exposed as $env: in all Windows Docker builds)
-ENV PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
-
-# 7. Copy build to C:\artifacts with suffix in name
+# 7. Copy build to C:\artifacts (aligned folder name with linux-bundle_${BUILD_ENV})
 RUN New-Item -ItemType Directory -Force -Path C:\artifacts | Out-Null; `
-    Copy-Item -Recurse -Force C:\app\build\windows\x64\runner\Release C:\artifacts\windows-release$env:PACKAGE_SUFFIX
+    $outDir = 'C:\artifacts\windows-release_' + $env:BUILD_ENV; `
+    Copy-Item -Recurse -Force C:\app\build\windows\x64\runner\Release $outDir

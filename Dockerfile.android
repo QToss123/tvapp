@@ -49,15 +49,17 @@ RUN flutter pub get
 
 COPY . .
 
-ARG BACKEND_URL
-ARG BOOK_KEY
-ARG PACKAGE_SUFFIX
+# Same build-args as Dockerfile.linux / Dockerfile.windows (pass from CI).
+ARG BUILD_ENV=Dev
+ARG BACKEND_URL=
+ARG BOOK_KEY=
 
 RUN flutter build apk --release \
     --dart-define=BACKEND_URL=${BACKEND_URL} \
     --dart-define=BOOK_KEY=${BOOK_KEY} \
-    --dart-define=PACKAGE_SUFFIX=${PACKAGE_SUFFIX}
+    --dart-define=PACKAGE_SUFFIX=_${BUILD_ENV} \
+    --dart-define=BUILD_ENV=${BUILD_ENV}
 
-# 10. Copy APK to /artifacts with suffix in filename
+# 10. Copy APK to /artifacts (aligned naming with Linux .deb)
 RUN mkdir -p /artifacts && \
-    cp /app/build/app/outputs/flutter-apk/app-release.apk /artifacts/app-release${PACKAGE_SUFFIX}.apk
+    cp /app/build/app/outputs/flutter-apk/app-release.apk "/artifacts/app-release_${BUILD_ENV}.apk"
